@@ -5,7 +5,7 @@
 // was linked on that SDK and has no UIApplicationSceneManifest: UIKit trips
 // __UIApplicationEvaluateRuntimeIssueForNoSceneLifecycleAdoption on the
 // FrontBoard scene-creation path and the process dies with EXC_BREAKPOINT
-// before a single line of ours runs. Austin's phone did exactly that with the
+// before a single line of ours runs. The user's phone did exactly that with the
 // first round-P build, and the concurrent round-Q agent hit the same thing on
 // the SIMULATOR the first time it built after the toolchain moved (D-037 §4):
 // it is the LINKED SDK that is checked, not the deployment target and not the

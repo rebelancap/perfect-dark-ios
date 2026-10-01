@@ -9,7 +9,7 @@ BLANK tile on visionOS. (The iOS target keeps its legacy CFBundleIconFiles PNGs
 untouched: Xcode 26's actool rejects a single-size iOS app-icon catalog, which
 is why they are not in a catalog in the first place — docs/build.md §Traps M2.)
 
-WHY A SCRIPT: so the layers come from ONE source of truth (the .ico Austin
+WHY A SCRIPT: so the layers come from ONE source of truth (the .ico the user
 dropped) and can be regenerated when it changes.
 
 The art makes the split exact rather than analytic: it is the PD mark on a
@@ -17,7 +17,7 @@ fully TRANSPARENT ground, so the alpha channel IS the subject mask. No luma
 guess, no feathering heuristic.
 
   Back   opaque black, edge to edge. Apple requires an opaque back layer, and
-         black is the icon's ground (Austin, 2026-09-14).
+         black is the icon's ground (the user, 2026-09-14).
   Front  the mark itself, alpha straight from the source, so it really does
          float above the ground and parallaxes as a separate plane instead of
          being flattened into the background.
@@ -42,7 +42,7 @@ SIZE = 1024
 # The mark's longest side as a fraction of the tile. The source .ico runs edge
 # to edge vertically, which on visionOS's circular, parallaxing tile reads as
 # cramped: the mark is scaled to this fraction and centred so it pops against
-# the black ground (Austin, 2026-09-18: "more padding, say 75%").
+# the black ground (the user, 2026-09-18: "more padding, say 75%").
 FILL = 0.75
 
 

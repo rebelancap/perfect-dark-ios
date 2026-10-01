@@ -1,6 +1,6 @@
 Subject: the crosshair gets the depth of what it points at (D-064)
 
-Austin: "why can't the crosshair just have dynamic depth? like we do in the
+the user: "why can't the crosshair just have dynamic depth? like we do in the
 quakes. instead of a fixed distance. it adjusts depending on where it points?"
 
 THE PROBLEM. The crosshair is a 2D rectangle at a screen position PD computed
@@ -128,7 +128,7 @@ index 6bccbf6e2..84a43dbe7 100644
 +// D-064: THE RETICLE'S OWN DEPTH, for the visionOS stereo fold.
 +// ---------------------------------------------------------------------------
 +//
-+// Austin: "why can't the crosshair just have dynamic depth? like we do in the
++// the user: "why can't the crosshair just have dynamic depth? like we do in the
 +// quakes. instead of a fixed distance. it adjusts depending on where it
 +// points?"
 +//

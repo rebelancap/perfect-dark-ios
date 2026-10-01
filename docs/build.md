@@ -175,7 +175,7 @@ and the numbers this produced.
   844×390 diverges from the fifth `gfx:` line — a wider viewport shows more
   geometry. Match the resolution before calling a gfx-stream diff a regression.
 - **The oracle run dir has the XBLA package in it.** `build/oracle-clang/xbla/`
-  holds Austin's `.rar`, and four of the five `Mod.Xbla*` rows are on by
+  holds the user's `.rar`, and four of the five `Mod.Xbla*` rows are on by
   default, so a "plain" oracle run is not N64 art. Seed the run's `pd.ini` with
   all five set to 0 when comparing against a container that has no package.
 - **`--exit-frame` and the resign-active hook both rewrite `pd.ini`.** Give
@@ -619,7 +619,7 @@ the things that cost time.
 
 - **The gate has never played the intro.** Every launch in `sim-validate.sh`
   and `vision-validate.sh` passes `--skip-intro`, so STAGE_TITLE is a path with
-  no coverage at all. Austin found a bug there by playing the game. If a report
+  no coverage at all. The user found a bug there by playing the game. If a report
   is about something that happens before the main menu, launch WITHOUT the flag
   before believing any instrument (M-029).
 - **The main thread is the GAME thread.** SDL's UIKit entry runs `pdEngineMain`
@@ -798,7 +798,7 @@ the SDK the binary was actually linked with (`vtool -show-build`, `DTSDKName`,
 
 **A reinstall over USB terminates the app, and this session may not start it
 again.** `devicectl device install app` kills the running process, and starting
-it from the command line is refused by the permission layer (Austin does that on
+it from the command line is refused by the permission layer (the user does that on
 his own hardware). So every device build costs one "please tap the icon" round
 trip: batch the changes.
 
@@ -812,7 +812,7 @@ cushion up whenever `queued < bufferSize`, but production is one frame's samples
 (368) per push and consumption is a whole device buffer (1024) at a time, so the
 queue sawtooths across one buffer by construction and is below `bufferSize` on
 every pull whatever the cushion is. It fired about four times a second and
-inserted 56 ms of silence each time - the stutter Austin reported. D-035, M-035.
+inserted 56 ms of silence each time - the stutter the user reported. D-035, M-035.
 The general lesson: a self-healing fix whose trigger is a *level* inside a
 sawtooth heals continuously, and its cost is invisible unless it is counted. It
 was counted only because `audio_silence` existed.
@@ -828,7 +828,7 @@ scene actions, are present with our app **not running at all** - captured
 2026-09-15 with the app dead: 330,859 syslog lines in 12 s, of which 21,455 were
 CoreBrightness, and every `Forward Event` in the sample went to
 `com.apple.UIKit.remote-keyboard`. It is iOS 27 on this device, it costs
-`backboardd` rather than our game thread, and Austin sees no brightness
+`backboardd` rather than our game thread, and the user sees no brightness
 changing. Nothing in `app/ios/` touches brightness, the scene settings or
 `preferredFrameRateRange` per frame (the only `idleTimerDisabled` is one
 assignment at startup).
@@ -837,7 +837,7 @@ assignment at startup).
 
 **Never deallocate a window that is key.** `+[PDSettingsViewController dismiss]`
 was `sWindow.hidden = YES; sWindow = nil;` — hide the app's key window, then
-free it — and on Austin's phone that left the scene with no key window and
+free it — and on the user's phone that left the scene with no key window and
 nothing promoted, which killed touch delivery app-wide until a force-quit. The
 order that works is: make the window you are going BACK to key and visible
 first, then hide, and keep the object. (D-041.)
@@ -851,7 +851,7 @@ and a settings row press are all clean there too.
 **A hit test from the OVERLAY and a hit test from the WINDOW are different
 questions, and only the second one is about touch.** `hit X Y` walks the touch
 layer's own chip table: it returns `button:FIRE` for a layer nothing can reach,
-which is exactly what it did while Austin could not move. The routed test —
+which is exactly what it did while the user could not move. The routed test —
 every window, highest level first, `[window hitTest:…]` — is what UIKit does,
 and it is `windows`/`route_ok` now. Round Q's three checks (interactivity,
 window membership, not-covered) are all *inside* SDL's window and a touch
@@ -894,7 +894,7 @@ closed has to be on the row when it comes back.
 
 **Routing right and no touch delivered are different failures, and this port has
 hit both.** Round R fixed the first (D-041: a deallocated key window) and
-Austin's phone then failed the second way on the fixed build — `route_ok=1`,
+the user's phone then failed the second way on the fixed build — `route_ok=1`,
 `game_is_key=1`, the watchdog silent, and twenty seconds of a held finger
 leaving `touch_tracking=000`. `windows` answers both questions now:
 `route_ok` for routing, and `ui_hittests` / `ui_touches_began` / `gear_taps` /
@@ -919,7 +919,7 @@ simulator" before this had not in fact driven it. `settings seg <section> <row>
 <segment>` does. (It still does not reproduce there.)
 
 **When a bug has never reproduced off one device, number the recoveries.**
-`heal 1..6` is six candidate fixes tried one at a time over USB while Austin is
+`heal 1..6` is six candidate fixes tried one at a time over USB while the user is
 IN the broken state, with `ui_hittests` saying whether delivery came back.
 Whichever one works names the cause — which is cheaper than another round of
 hypotheses, and it costs him one session rather than one build each.
@@ -930,7 +930,7 @@ hypotheses, and it costs him one session rather than one build each.
 60 Hz range on a 120 Hz panel stops UIKit delivering touches to this app
 entirely — hit-testing, the windows, the key window, the engine and the bridge
 all stay perfect and not one `-touchesBegan:` arrives. A/B'd four times on
-Austin's phone in one session with no relaunch (D-043). Run the link at the
+the user's phone in one session with no relaunch (D-043). Run the link at the
 panel's rate for the life of the process and deliver a lower frame rate with the
 pacer's divisor instead; `pacing_link_hz` is what the link holds and
 `pacing_target` is what the player asked for.
@@ -969,7 +969,7 @@ explanation that held was alternated four times in one session.
 
 **When the gear is dead too, the overlay is not the suspect.** The gear is a
 UIButton sibling in the same window as the chips. Both dead at once is app-wide
-delivery, and that one sentence in Austin's first report would have skipped a
+delivery, and that one sentence in the user's first report would have skipped a
 round.
 
 **Device builds must re-run `scripts/gen-app-project.sh`** or `build_stamp.h`
@@ -1128,7 +1128,7 @@ list below is short — but every item on it would have been a silent failure.
   that is handled by compiling `PDSceneDelegate` out (below).
 - **`PDSceneDelegate` must be ABSENT on xrOS, not merely unused.** UIKit
   persists a scene session's configuration name *and delegate class name*
-  across installs over the same bundle id, so Austin's headset — which has run
+  across installs over the same bundle id, so the user's headset — which has run
   the Phase-5 builds — will try to restore a session naming that class. With
   the class gone the lookup fails and UIKit falls back to the app delegate's
   configuration, which is SwiftUI's. Hence `#if !TARGET_OS_VISION` around the
@@ -1681,7 +1681,7 @@ precision is needed. Measured 2.00 (`scripts/stereo-glare-check.py`).
 ## Traps earned (Phase 6 dev3: the near law, the reticle's trace, and a budget that was a width)
 
 - **A "comfort" complaint can be a FUSION failure, and the two want opposite
-  fixes.** Austin's "disorienting when the gun overlaps the world" reads like a
+  fixes.** The user's "disorienting when the gun overlaps the world" reads like a
   preference; the arithmetic says a wall 30 units from Joanna's face carried
   **+402 px of crossed disparity on the shipped eye — twelve degrees**, which is
   not uncomfortable, it is DOUBLE. Compute the disparity at the nearest distance
@@ -1702,7 +1702,7 @@ precision is needed. Measured 2.00 (`scripts/stereo-glare-check.py`).
   nearest" forces the world entirely behind the panel, which flattens every PD
   interior (corridors are 150-300 units and the convergence is 762). Pick two,
   deliberately, and write down which one you gave up (D-061 gave up the HUD, and
-  Q-029 item 2 is Austin auditing that choice).
+  Q-029 item 2 is the user auditing that choice).
 - **Clamp in 1/d, not in d.** Disparity is linear in `1/d`, so a saturation
   written on `1/d` has a constant-slope knee and one written on `d` does not. The
   soft knee `q' = qm - dq/(1 + (q-q0)/dq)` is C1, monotone, asymptotic (so
@@ -1821,7 +1821,7 @@ hands; one more was applying to the wrong place and reporting `ok`.
   (D-065). Its prose said the bump would make it FAIL to apply — it did not.
   `patch` recognised the hunks as already present, assumed `-R`, **removed all
   three guards from the tree** and exited 0, so the overlay reported a green
-  apply onto a tree that had just lost the fix Austin's crash was published
+  apply onto a tree that had just lost the fix the user's crash was published
   for. The tell is in the log `apply-overlay.sh` discards on success
   ("Reversed (or previously applied) patch detected!"). A patch that reports
   `ok` is not evidence the tree gained anything — grep the tree for the change

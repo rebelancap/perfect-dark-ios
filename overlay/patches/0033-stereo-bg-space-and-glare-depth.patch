@@ -2,7 +2,7 @@ Subject: the floor is not flat: the stereo fold in the space the matrix consumes
 
 D-060, and the correction of D-055's second half.
 
-THE BUG AUSTIN SAW. On 0.0.0.10, in the headset: "anything that interacts with
+THE BUG THE USER SAW. On 0.0.0.10, in the headset: "anything that interacts with
 the floor feels like it's popping or hovering well above it, when you get close
 to it. from afar, things are on the floor fine, don't look weird. but as you
 approach, it looks like the objects hover above the floor. dead bodies,
@@ -30,7 +30,7 @@ plain one - with a modelview that already carries the view. So the floor and
 the walls were flat on the panel while the body lying on the floor was folded
 at its true depth. Far away both are near the panel and nothing looks wrong;
 walk up and the floor stays on the glass while the body comes forward. That is
-Austin's sentence, and it is also his wall panels, his doors and his ramps.
+the user's sentence, and it is also his wall panels, his doors and his ramps.
 
 FIVE CHANGES.
 
@@ -64,7 +64,7 @@ FIVE CHANGES.
   4. THE VIEWMODEL CONVERGES AT ITS NEAREST VERTEX, not its origin. D-055 put
      the origin on the panel, which left the whole muzzle end of the gun in
      FRONT of it, carrying crossed disparity, under an ammo HUD that is 2D at
-     zero disparity and drawn over it. Austin: "the gun goes behind the ammo
+     zero disparity and drawn over it. The user: "the gun goes behind the ammo
      hud, but the gun, depth wise, is much closer to me, so a little
      disorienting. HUD should probably be closest to me?" It is now: gfx_pc
      measures every gun-classed vertex's clip w and the frame's minimum becomes
@@ -77,7 +77,7 @@ FIVE CHANGES.
      (artifact.c), so it has no matrix, the fold never sees it, and both eyes
      drew it in the same place - a bright, small, high-contrast thing sitting
      on the panel while its fixture is at depth, which is the most
-     uncomfortable object a stereo scene can contain. Austin: "every time i
+     uncomfortable object a stereo scene can contain. The user: "every time i
      look at a light, it hurts". artifact.c now tags each glare rectangle with
      its view depth and gfx_draw_rectangle shifts it by exactly the disparity
      the world fold would have given a point there, before the aspect
@@ -137,7 +137,7 @@ index f1b4fb617..8a094bddc 100644
 +// were being classed FLAT — zero disparity, flat ON the panel — while the body
 +// lying on that floor was folded at its true depth. From across a room both are
 +// near the panel and nothing looks wrong; walk up to them and the floor stays
-+// on the glass while the body comes forward. Austin, on 0.0.0.10: "anything
++// on the glass while the body comes forward. The user, on 0.0.0.10: "anything
 +// that interacts with the floor feels like it's popping or hovering well above
 +// it, when you get close to it. from afar, things are on the floor fine ...
 +// same with things that intersect with walls. computers or panels that are on
@@ -293,7 +293,7 @@ index f1b4fb617..8a094bddc 100644
 +        // origin. D-055 put the origin on the panel, which left every vertex
 +        // in front of the origin — the whole muzzle end of the gun — CROSSED,
 +        // popping out of the glass in front of a HUD that is at zero disparity
-+        // and drawn over it. Austin: "the gun goes behind the ammo hud, but
++        // and drawn over it. The user: "the gun goes behind the ammo hud, but
 +        // the gun, depth wise, is much closer to me, so a little disorienting.
 +        // HUD should probably be closest to me?" It is now, because nothing
 +        // else comes in front of the panel (quake3e D-028 v2).
@@ -407,7 +407,7 @@ index f1b4fb617..8a094bddc 100644
 +    // and the fold never sees it: both eyes drew it in the same place, which
 +    // put it ON the panel while the fixture it belongs to sat at its own depth.
 +    // A bright, small, high-contrast thing at the wrong depth is the single
-+    // most uncomfortable object in a stereo scene, and Austin said so: "every
++    // most uncomfortable object in a stereo scene, and the user said so: "every
 +    // time i look at a light, it hurts".
 +    //
 +    // The shift is the disparity the WORLD fold would have given a point at
@@ -460,7 +460,7 @@ index 775d7c9d1..1b2bde897 100644
 +						// function projected itself, so it has no matrix and
 +						// the visionOS stereo fold cannot give it a disparity:
 +						// it lands ON the panel while its light fixture is at
-+						// its own depth. Austin, in the headset on 0.0.0.10:
++						// its own depth. The user, in the headset on 0.0.0.10:
 +						// "every time i look at a light, it hurts". The tag
 +						// hands the renderer the depth, and it shifts the
 +						// rectangle per eye. One tag, one rectangle.
@@ -524,7 +524,7 @@ index 3e03df788..dafe7b2b7 100644
 + *                a position it projected itself (artifact.c), so they have no
 + *                matrix and therefore no disparity - they sit ON the panel
 + *                while the fixture they belong to sits at its own depth, which
-+ *                is what Austin reported as "every time i look at a light, it
++ *                is what the user reported as "every time i look at a light, it
 + *                hurts". The tag is consumed by ONE rectangle and hands the
 + *                renderer the depth it needs to shift that rectangle per eye.
 + *

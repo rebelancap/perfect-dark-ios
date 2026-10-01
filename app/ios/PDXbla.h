@@ -31,7 +31,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 typedef NS_ENUM(NSInteger, PDXblaKind) {
 	PDXblaNone = 0,
-	PDXblaArchiveRar,     // Perfect Dark.rar — Austin's copy, and the common one
+	PDXblaArchiveRar,     // Perfect Dark.rar — the user's copy, and the common one
 	PDXblaArchive7z,      // the .7z upstream's own message names
 	PDXblaArchiveOther,   // .zip / .pk3 — archiveIsSupported() takes these too
 	PDXblaPackage,        // the bare STFS container: LIVE / CON  / PIRS

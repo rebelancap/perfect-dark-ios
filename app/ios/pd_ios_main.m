@@ -287,7 +287,7 @@ int pdSDLMain(int argc, char *argv[])
 		SDL_SetHintWithPriority(SDL_HINT_JOYSTICK_HIDAPI, "0", SDL_HINT_OVERRIDE);
 		SDL_SetHintWithPriority(SDL_HINT_JOYSTICK_HIDAPI_STEAM, "0", SDL_HINT_OVERRIDE);
 
-		// Half of the keyboard trap (D-033, Austin on device): creating a
+		// Half of the keyboard trap (D-033, the user on device): creating a
 		// profile offers "type with the iOS keyboard", and once it was up there
 		// was no way down - force-quit. SDL only calls SDL_StopTextInput() from
 		// textFieldShouldReturn: when this hint is set, and nothing set it

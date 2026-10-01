@@ -137,7 +137,7 @@ flags off: 477 triangles becomes 2880 (M-003).
 ### The `.rar` IS accepted — and then the package is not found
 
 `archiveIsSupported()` takes `.rar` alongside `.7z`/`.zip`/`.pk3`, and the
-unpack of Austin's copy works. But that archive stores the package four names
+unpack of the user's copy works. But that archive stores the package four names
 deep (`Perfect Dark/584109C2/000D0000/<content id>`) and
 `XBLAIMPORT_SCAN_DEPTH` is **2**, so the scan after the unpack fails with
 "xbla: no Xbox 360 package inside ...", latches `unpackFailed`, never writes

@@ -93,7 +93,7 @@ static UIWindow *pdVisionSDLWindow(void)
 /**
  * WEAR THE SYSTEM'S ROUNDED CORNERS (dev2; sm64_vision_host.m :160-203).
  *
- * Austin, device round 1: "the parked 2d window doesn't have rounded corners
+ * The user, device round 1: "the parked 2d window doesn't have rounded corners
  * when you enter 3d. then when you exit 3d, the resulting 2d window where you
  * can keep playing, it doesn't have rounded corners anymore either."
  *

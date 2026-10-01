@@ -95,7 +95,7 @@ void PDDefaultsRegister(void)
 		// yet (Q-010). The lever itself takes any value the env carries.
 		PDDefRenderScalePct: @(100),
 		PDDefShowFPS: @NO,
-		// D-044: OFF here on purpose — Austin must still be able to reproduce
+		// D-044: OFF here on purpose — the user must still be able to reproduce
 		// the 120 -> 60 wedge. `hide60 on` over the bridge, or @YES here, is the
 		// one-line insurance for the next public build.
 		PDDefHide60On120: @NO,
@@ -111,7 +111,7 @@ void PDDefaultsRegister(void)
 		PDDefAudioMasterVolume: @1.0f,
 		PDDefAudioMute: @NO,
 
-		// The visionOS 3D panel. AUSTIN'S OWN NUMBERS after the 0.0.0.11
+		// The visionOS 3D panel. THE USER'S OWN NUMBERS after the 0.0.0.11
 		// headset session (D-061): "make default screen width 20 ft, height
 		// 12 ft. stereo depth 150%. ... crosshair distance be 25 ft." So a
 		// 6.096 x 3.658 m screen (20 x 12 ft, aspect 5:3) 3.6 m away at eye
@@ -252,7 +252,7 @@ void PDDefaultsApplyToEngine(void)
 		// silently floored a 90 Hz headset at 60 however the row was set.
 		//
 		// A value stored by an EARLIER build can be above this panel's maximum
-		// (0.0.0.9's row offered 120 on the headset and Austin selected it), so
+		// (0.0.0.9's row offered 120 on the headset and the user selected it), so
 		// it is clamped here and WRITTEN BACK — otherwise the segmented control
 		// would show no selection at all for a rate the engine is not using.
 		const NSInteger high = PDPanelHighHz();
@@ -264,7 +264,7 @@ void PDDefaultsApplyToEngine(void)
 		const NSInteger want = PDDefInt(PDDefRefreshHz) >= high ? high : 60;
 		// ...but NOT while the settings page is on screen (D-041 round 2).
 		//
-		// Austin: "it doesn't break the touch screen when I change from 60 to
+		// The user: "it doesn't break the touch screen when I change from 60 to
 		// 120 fps" - only 120 -> 60, twice, on two builds. That direction is
 		// the only one that turns the ENGINE's tick gate back ON
 		// (Game.TickRateDivisor 0 -> 1, a sysSleep spin at the top of
@@ -288,7 +288,7 @@ void PDDefaultsApplyToEngine(void)
 			PDLifecycle("defaults: applying panel rate %ld Hz (tick gate -> 0, engine+target %ld)",
 				(long)want, (long)want);
 			// The tick gate is OFF on iOS at EVERY rate, and that is the
-			// round-R fix for Austin's dead touch (D-043).
+			// round-R fix for the user's dead touch (D-043).
 			//
 			// D-034 set the divisor to 1 at 60 Hz, reasoning that the engine's
 			// gate should match the panel. It should not: on iOS the display
@@ -307,7 +307,7 @@ void PDDefaultsApplyToEngine(void)
 			// and the HID event source never gets serviced. Touch delivery
 			// stops dead while hit-testing, the windows, the key window, the
 			// engine, the bridge and even the bridge's own main-queue blocks
-			// all stay perfect, which is precisely the state Austin reached.
+			// all stay perfect, which is precisely the state the user reached.
 			//
 			// It explains his asymmetry exactly: 60 -> 120 sets the divisor to
 			// 0 and never breaks; 120 -> 60 set it to 1 and broke every time,

@@ -22,7 +22,7 @@
 //      frame rate, anchored at 120 Hz.
 //   3. **Hide the touch overlay while a pad is connected**, and bring it back
 //      when the pad goes away.
-//   4. **The combat roll**, which is Austin's on 0.0.0.7: "on gamepad, right
+//   4. **The combat roll**, which is the user's on 0.0.0.7: "on gamepad, right
 //      thumbstick click does a right roll. instead, it should be double tapping
 //      left joystick LEFT or RIGHT to do a roll." Both halves live here - the
 //      R3 bind is taken off the roll and the double flick replaces it (D-037) -
@@ -124,7 +124,7 @@ static const NSTimeInterval kFlickWindow = 0.30;
 }
 
 /**
- * Take the combat roll off R3 (Austin, 0.0.0.7; D-037).
+ * Take the combat roll off R3 (the user, 0.0.0.7; D-037).
  *
  * Upstream binds it there by default - `{ CK_0800, SDL_CONTROLLER_BUTTON_
  * RIGHTSTICK }`, input.c:239, plus inputMigrateRollBind() which moves Third

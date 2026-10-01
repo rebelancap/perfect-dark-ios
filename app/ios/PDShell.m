@@ -564,7 +564,7 @@ void pdIosFrameHook(void)
 		// The settings page, built once, a few seconds in (BUG 4 / D-041). It
 		// used to be built by the first gear tap, on this thread, in that
 		// frame: forty-odd cells with their switches, segmented controls and
-		// SF Symbols, which is the hitch Austin feels the first time he opens
+		// SF Symbols, which is the hitch the user feels the first time he opens
 		// it. Here it lands in a frame nobody is waiting on, and because the
 		// page now outlives a dismiss it is the only time it is ever paid.
 		if (shell.engineRunning && shell.frameCount == 600) {

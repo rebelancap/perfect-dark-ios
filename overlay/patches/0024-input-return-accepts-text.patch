@@ -9,7 +9,7 @@ keyboard" (menuitem.c row 5 -> inputStartTextInput), and a software keyboard's
 only dismiss affordance is its own Return key — there is no Escape, and the
 game's own on-screen OK is underneath the keyboard. SDL sends the scancode
 (SDL_uikitviewcontroller.m textFieldShouldReturn) and nothing consumed it, so
-the dialog could be typed into and never left: force-quit (Austin, on device,
+the dialog could be typed into and never left: force-quit (the user, on device,
 2026-09-14). The other half of the fix is SDL_HINT_RETURN_KEY_HIDES_IME in
 app/ios/pd_ios_main.m, which is what actually lowers the keyboard.
 

@@ -1,6 +1,6 @@
 // PDWatchdog.h — the instrument for a failure that answers no sockets (D-044).
 //
-// Round R's wedge on Austin's phone had the game alive by `devicectl`, touch
+// Round R's wedge on the user's phone had the game alive by `devicectl`, touch
 // dead, and the :8775 bridge silent even to `help` — a command that never
 // touches the engine. A bridge that cannot answer means no socket thread got
 // scheduled, and everything this port can measure is read THROUGH that bridge.

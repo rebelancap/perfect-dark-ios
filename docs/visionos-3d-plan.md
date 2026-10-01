@@ -1,12 +1,12 @@
 # Phase 6 plan — visionOS 3D stereo mode with foveated rendering (2026-09-17)
 
-Austin, 2026-09-17: *"Let's start on the visionOS 3D stereo mode. Follow what we
+the user, 2026-09-17: *"Let's start on the visionOS 3D stereo mode. Follow what we
 did exactly with all the settings and parked window, etc."* This is the FAMILY
 recipe (vkQuake → quake3e → q2repro → SoH → sm64coopdx) applied to THIS engine
 (Fast3D interpreter, `gfx_pc.cpp`) on THIS substrate (ANGLE-Metal ES 3.0,
 D-008). Nothing here is a new design; every choice below cites the sibling
-that already shipped it. Written for a fresh Opus execution agent per
-milestone. Line numbers are against the current vendor pin unless stated.
+that already shipped it. Written to be executed one milestone
+at a time. Line numbers are against the current vendor pin unless stated.
 
 Uncommitted companion: `docs/visionos-3d-plan-decisions.md` (draft D-047…D-053
 for the orchestrator to merge into DECISIONS.md).
@@ -132,7 +132,7 @@ An `ImmersiveSpace` can only be declared by a SwiftUI `App`
   `Info-visionos.plist:27-38`, q2repro gen-app-project.sh:301-321). The
   persisted-session trap (NOTES-FROM-VKQUAKE :15-45): UIKit persists
   (configuration name + delegate class) across installs of the same bundle id,
-  so Austin's headset, which has run Phase-5 builds, will try to restore a
+  so the user's headset, which has run Phase-5 builds, will try to restore a
   session pointing at `PDSceneDelegate`. Fix as the family did: on visionOS the
   class must not resolve — compile `PDSceneDelegate` out under `TARGET_OS_VISION`
   (its two jobs move: the graft to a platform-agnostic `pdGraftSDLWindows()` in
@@ -500,7 +500,7 @@ sky sentinels (only if the P-shape test fails). New shell files under
   climbs); an aborted exit (kill the app during 3D) leaves a pd.ini written
   within the last second (`stat`).
 
-**M5 — Foveation + device numbers** (DEVICE, ~1 round + Austin)
+**M5 — Foveation + device numbers** (DEVICE, ~1 round + the user)
 - Files: `PDCompositorConfiguration` (§2.11), env gate for the A/B, `xr3diag`-
   style one-shot contract log and a 5 s `xr3stat` line in `Documents/logs`.
 - Sim: capability-guarded path enters/exits/re-enters cleanly (guide
@@ -508,7 +508,7 @@ sky sentinels (only if the P-shape test fails). New shell files under
   warping coupled to head motion, sharpness at gaze; `imm_hz` 90 (or 100/120 on
   an M5) with `inflight ≤ 2`, thermal in the log, engine `pace` slack > 0;
   Render Resolution default chosen from the measurement (M-0xx), not assumed.
-- Remove the foveation env gate after Austin's verdict.
+- Remove the foveation env gate after the user's verdict.
 
 **M6 — Settings sheet + persistence + Reset** (~1 round)
 - Files: `PDVisionSettingsViewController.m`, `PDVisionApp.swift` (.sheet,
@@ -530,7 +530,7 @@ sky sentinels (only if the P-shape test fails). New shell files under
 
 Rough size: M1 ~600 lines Swift/ObjC + plist/project; M2 ~300 (mm) + patch
 0031 ~120; M3 patch 0030 ~200 + ~400 (pacing/publish); M4 ~300; M5 ~60 + logs;
-M6 ~400; M7 ~300 script + docs. Review (Sonnet, light) after M3 and M4 only.
+M6 ~400; M7 ~300 script + docs. Review (light) after M3 and M4 only.
 
 ## 5. Files that change (existing) — for the orchestrator's briefs
 `app/ios/pd_ios_main.m` (split `pdShellPrepare`; `main()` iOS-only),
@@ -549,7 +549,7 @@ New overlay patches 0030/0031 (+0032/0033 if needed). Vendor untouched.
 | Risk | Check |
 |---|---|
 | SwiftUI @main + SDL2's UIKit video without SDL's app delegate | M1: sm64coopdx proves SDL2 2.32 does this (`sharedAppDelegate` is referenced only in SDL's own delegate .h — verified by grep on `work/sdl2-visionos/src`); assert window created + graft count in `state` |
-| Stale persisted scene session → `PDSceneDelegate` on Austin's headset | M1 device install over the Phase-5 build; the class is absent on xrOS so lookup fails and UIKit falls back (the family fix); log `scene willConnect` from SwiftUI |
+| Stale persisted scene session → `PDSceneDelegate` on the user's headset | M1 device install over the Phase-5 build; the class is absent on xrOS so lookup fails and UIKit falls back (the family fix); log `scene willConnect` from SwiftUI |
 | Running `gfx_run_dl` twice per frame has side effects | M3 seeded-replay-in-3D: per-eye `gfx:` lines == oracle |
 | `EGL_METAL_TEXTURE_ANGLE` image on this ANGLE build / device mismatch | M2: `eglCreateImageKHR` returns non-NULL, `glCheckFramebufferStatus` complete, `EGL_ANGLE_device_metal` device == `MTLCreateSystemDefaultDevice()` logged |
 | Grade pass or MSAA resolve still targets GL fb 0 somewhere | M2 screenshot parity vs 2D (grade visibly on) and a surfaceless context makes any stray fb-0 draw error loudly (`glGetError` polled per eye in debug) |
@@ -563,7 +563,7 @@ New overlay patches 0030/0031 (+0032/0033 if needed). Vendor untouched.
 | Foveation unverifiable on sim | Guarded path gate on sim; verdict on device (M5) |
 | ARKit world tracking needs a usage string? | Device anchor needs none in the siblings' plists; the sim enforces none (D-030) — DEVICE first launch watches for a TCC kill in `crash.txt` |
 
-## 7. Open questions for Austin (Q-020…Q-023 drafts; defaults apply if unanswered)
+## 7. Open questions for the user (Q-020…Q-023 drafts; defaults apply if unanswered)
 
 - **Q-020 — stereo defaults on the headset.** Does 100 % Stereo Depth (63 mm
   at 1 unit ≈ 1 cm) and Crosshair Distance 20 ft read right, and is the gun

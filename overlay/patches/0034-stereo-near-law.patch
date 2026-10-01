@@ -1,6 +1,6 @@
 Subject: the gun is nearer than every world pixel it borders (D-061)
 
-Austin, on 0.0.0.11: "my only complaint is how the GUN intersects or overlaps
+the user, on 0.0.0.11: "my only complaint is how the GUN intersects or overlaps
 with elements in the rendered world. it's a little disorienting, especially when
 you get close to a wall and your eyes focus on the edges of your gun and how it
 overlaps with the world around you." And, on being asked whether it was only
@@ -23,7 +23,7 @@ THE MECHANISM, verified before it was designed against.
 
 So on every frame with the weapon up, occlusion and stereo said opposite things
 about the same edge, and the size of the disagreement grew as she approached
-anything. That is the whole of Austin's paragraph, and neither half of it is a
+anything. That is the whole of the user's paragraph, and neither half of it is a
 comfort preference: it is a contradiction in the picture.
 
 WHAT THE SIBLINGS DID, and why this is not quite theirs. quake3e hit exactly
@@ -67,7 +67,7 @@ the ammo HUD is no longer the nearest thing on screen - the gun is, by U*3.5,
 about 1.7 degrees. That is the same class of conflict D-060 removed, moved from
 the gun's whole silhouette (every frame, growing without bound) to one corner
 of the HUD (bounded, and only where they overlap). It is a trade and it is
-Austin's to judge; the alternative - moving the 2D layer forward with the gun -
+the user's to judge; the alternative - moving the 2D layer forward with the gun -
 takes the crosshair off the convergence plane the "Crosshair Distance" row is
 named after, which is a worse bargain. Q-029 carries it.
 
@@ -162,7 +162,7 @@ index 8a094bddc..9257c5f97 100644
 +    // the depth the scene has behind the panel, and the unit everything below
 +    // is written in. A world point at view depth d gets a*e*(1/conv - 1/d),
 +    // whose crossed part grows without bound as d falls, and PD lets Joanna put
-+    // her face against a wall. Austin, on 0.0.0.11: "how the GUN intersects or
++    // her face against a wall. The user, on 0.0.0.11: "how the GUN intersects or
 +    // overlaps with elements in the rendered world ... especially when you get
 +    // close to a wall", and "it's a little disorienting even when it overlaps
 +    // with the ground. it's disorienting often."

@@ -154,7 +154,7 @@ Option 2 is the right answer only if the SecureTransport row ever stops
 building, or if a future App Store posture (not this port's — it sideloads)
 made vendored TLS unwelcome. Keep it documented; do not build it now.
 
-**Default if Austin says nothing:** the phasing above — `PD_HAVE_CURL` off
+**Default if the user says nothing:** the phasing above — `PD_HAVE_CURL` off
 through Phase 1, static curl in Phase 2.
 
 ## Not determined here

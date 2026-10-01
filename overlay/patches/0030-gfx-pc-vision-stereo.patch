@@ -24,14 +24,14 @@ TARGET_OS_VISION:
     it classified as much geometry "sky" as "world" (2290014 against 2266415),
     because PD's lists MULTIPLY into the projection and the product stops being
     axis-aligned. Half the room then had no eye offset at all, which is what
-    Austin saw as floating bodies, wrong doors and "trippy" ramps.
+    the user saw as floating bodies, wrong doors and "trippy" ramps.
 
     Four rules now: WORLD (the full fold, and every untagged projection in the
     engine), SKY (the convergence skew only - a translation folded behind the
     camera rotation would be a world-space shift), GUN (the viewmodel converges
     at its own |mv[3][2]| with a separation scaled to that depth - D-049's
     C_gun = znear = 1.5 was a ~2.7 NDC-unit sideways shift, which is why the
-    gun class counter read 247990 while Austin could see no gun), and FLAT (no
+    gun class counter read 247990 while the user could see no gun), and FLAT (no
     fold: bit-identical in both eyes, ON the panel - menuRender's own span, and
     an orthographic projection, of which this engine has a dozen contrary to
     §2.4).
@@ -115,7 +115,7 @@ index ac253862f..f1b4fb617 100644
 +// axis-aligned meant world, a non-zero off-diagonal meant the sky's
 +// camera-basis fold, and a znear of 1.5 recovered from P[3][2]/(P[2][2]-1)
 +// meant the gun. On the simulator, with N64 art, that read world 187440 /
-+// sky 1540 / gun 104 and looked right. On Austin's headset, with 4J's XBLA
++// sky 1540 / gun 104 and looked right. On the user's headset, with 4J's XBLA
 +// release on, it read
 +//
 +//     stereo_cls_world=2266415  stereo_cls_sky=2290014  stereo_cls_gun=247990
@@ -204,7 +204,7 @@ index ac253862f..f1b4fb617 100644
 + *     NDC is [-1, 1]. The viewmodel was shifted more than a whole screen width
 + *     sideways and drew entirely outside the frustum, in both eyes. That is why
 + *     the gun class counter read 247990 on the headset (the branch was TAKEN)
-+ *     while Austin could see no gun at all. `C_gun = znear` reads like quake3e
++ *     while the user could see no gun at all. `C_gun = znear` reads like quake3e
 + *     D-028 v2 but it is not: the gun's znear is 1.5 PD units, a centimetre and
 + *     a half, and the viewmodel's geometry sits tens of units away. Converging
 + *     at a plane thirty times nearer than the subject is a divergence, not a
@@ -228,7 +228,7 @@ index ac253862f..f1b4fb617 100644
 + *     comfortable end of "plausible" rather than the diplopic end.
 + *
 + *     `3d gunconv <units>` replaces C_gun with a fixed plane (and scales e_gun
-+ *     to match) for Austin's one A/B round, exactly as the plan intended.
++ *     to match) for the user's one A/B round, exactly as the plan intended.
 + *
 + *  4. FLAT - no fold at all, so the two eyes are bit-identical and the content
 + *     sits exactly ON the panel. Two things take it:

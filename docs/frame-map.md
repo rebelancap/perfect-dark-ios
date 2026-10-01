@@ -356,7 +356,7 @@ recovered from the shape of P, and that was wrong on device: PD's lists
 multiply into the projection (`G_MTX_MUL` with `G_MTX_PROJECTION`) and 4J's
 XBLA mesh lists do it constantly, after which the product is no longer
 axis-aligned and the shape test called it sky — 2290014 "sky" projections
-against 2266415 "world" ones on Austin's headset, so half the room drew with no
+against 2266415 "world" ones on the user's headset, so half the room drew with no
 eye offset at all.
 
 The engine says it instead. A tagged `G_NOOP` (`src/include/gbiex.h`,
@@ -390,7 +390,7 @@ correctly-signed disparity across the weapon's own length.
 
 **Units and defaults.** `constants.h:496` (`vv_eyeheight` ~ 160 for a 1.6-1.7 m
 Joanna) makes **1 PD unit ~ 1 cm**. Half-separation `e = 3.15` units at Stereo
-Depth 100 % is a 63 mm IPD; **Convergence 762 units = 25 ft = 7.62 m** and the shipped Stereo Depth is **150 %** (`e = 4.725`), both Austin's numbers (D-061).
+Depth 100 % is a 63 mm IPD; **Convergence 762 units = 25 ft = 7.62 m** and the shipped Stereo Depth is **150 %** (`e = 4.725`), both the user's numbers (D-061).
 
 **2D carries zero disparity for free — except where it is TAGGED with a depth.**
 PD's rectangles (`gfx_dp_fill_rectangle`, `gfx_dp_texture_rectangle`) are

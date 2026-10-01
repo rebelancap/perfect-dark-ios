@@ -163,7 +163,7 @@ if [ "$DO_XBLA" = "1" ]; then
 	# The player's own copy, exactly as it came, in exactly the folder the
 	# Files app shows them. Not pre-unpacked and not flattened: the whole point
 	# of the run is that the app does that itself, through patch 0001's scan
-	# depth (Austin's .rar stores the package four names deep).
+	# depth (the user's .rar stores the package four names deep).
 	mkdir -p "$DOCS/added-content"
 	cp -f "$XBLA_ARCHIVE" "$DOCS/added-content/"
 	echo "  pushed $(basename "$XBLA_ARCHIVE") into Documents/added-content"
@@ -381,7 +381,7 @@ PACE_ENGINE="$(get pacing_engine_hz)"
 # thread in nanosleep() at the top of the frame - the same thread that is this
 # app's UIKit thread - and UIKit stops delivering touches entirely while
 # hit-testing, the windows and the bridge all stay perfect. That is the bug
-# Austin hit three builds running, and it is a second wait on the one clock
+# the user hit three builds running, and it is a second wait on the one clock
 # docs/pacing.md allows.
 TICKDIV="$(bridge 'cfg get Game.TickRateDivisor')"
 case "$TICKDIV" in
@@ -455,7 +455,7 @@ qstate
 [ "$(qget gear_hidden)" = "1" ] || fail "the gear is still up in live gameplay (gear_hidden=$(qget gear_hidden))"
 echo "  gameplay: touch_hidden=1, gear_hidden=1, player at $(qget player_pos)"
 
-# 2. Pause on the PAD, which is Austin's report: the gear must come back. Before
+# 2. Pause on the PAD, which is the user's report: the gear must come back. Before
 #    D-037 it could not, because the predicate only ran from -publish and
 #    +publishInput returns before -publish whenever the layer is hidden - which
 #    with a controller connected is always.
@@ -468,7 +468,7 @@ for i in 1 2 3; do
 	[ "$(qget menu_open)" = "1" ] && break
 done
 [ "$(qget menu_open)" = "1" ] || fail "Start on the pad did not open the pause menu (menu_open=$(qget menu_open))"
-[ "$(qget gear_hidden)" = "0" ] || fail "the gear did NOT come back on a pad pause — Austin's report, D-037"
+[ "$(qget gear_hidden)" = "0" ] || fail "the gear did NOT come back on a pad pause — the user's report, D-037"
 echo "  paused on the pad: menu_open=1, gear_hidden=0"
 bridge state > "$WORK/q-gear-paused.txt"
 xcrun simctl io "$SIM" screenshot "$WORK/q-gear-paused.png" >/dev/null 2>&1 || true
@@ -535,7 +535,7 @@ case "$FAKEOFF" in *overlay_hidden=0*) ;; *) fail "removing the pad did not brin
 case "$FAKEOFF" in *overlay_interactive=1*) ;; *) fail "the chips came back with interaction off: $FAKEOFF" ;; esac
 case "$FAKEOFF" in *overlay_in_window=1*) ;; *) fail "the chips came back detached from the window: $FAKEOFF" ;; esac
 
-# ...and a press must actually REACH the engine, which is the half Austin's
+# ...and a press must actually REACH the engine, which is the half the user's
 # report was about: "they did come back... but then none of them worked."
 # The hold is explicit: `tap` releases after 140 ms by default, which is gone
 # before a second `nc` round trip can look at it. touch_sent_mask is the proof -
@@ -570,7 +570,7 @@ sleep 1
 # D-041: a REAL touch has to still reach the chips after the page goes away.
 # Everything else this gate asserts about touch goes through the overlay's own
 # model (`hit`, `tap`), which is right even when UIKit is delivering every
-# finger to another window - which is exactly what Austin hit twice. `windows`
+# finger to another window - which is exactly what the user hit twice. `windows`
 # hit-tests FROM THE WINDOW, in the order UIKit consults them, so it is the one
 # check that can see the failure that cost this round.
 bridge "touch on" >/dev/null

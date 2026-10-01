@@ -61,7 +61,7 @@ static inline NSInteger PDVisionMaxFPS(void)
  * The HIGH option of the Frame rate row, and the display link's range (D-056).
  *
  * The row used to offer a hard-coded 120 Hz and the pacer used to gate anything
- * that was not >= 120 down to 60, which on a 90 Hz Vision Pro meant Austin could
+ * that was not >= 120 down to 60, which on a 90 Hz Vision Pro meant the user could
  * select "120 Hz" in the sheet and get 60 — the headset read of 0.0.0.9 reported
  * exactly that ("frame rate set to 120 but locked at 60 in 2D and 3D", and the
  * lifecycle log agreed: "refreshHz=120 -> applying panel rate 60 Hz").

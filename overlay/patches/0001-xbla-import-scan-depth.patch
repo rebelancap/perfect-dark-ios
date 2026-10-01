@@ -1,6 +1,6 @@
 Subject: xbla: look two folders deeper for the package inside a dropped archive
 
-Austin's own XBLA archive ("Perfect Dark.rar", the copy this port is built
+the user's own XBLA archive ("Perfect Dark.rar", the copy this port is built
 around) stores the STFS package as
 
     Perfect Dark/584109C2/000D0000/35C1CDD22DD0D4E54B858859C0052124FFFAD17958

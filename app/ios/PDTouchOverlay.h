@@ -17,7 +17,7 @@ BOOL PDTouchOverlayAnyPadConnected(void);
  * 1 = pretend a pad is connected, 0 = pretend none is, -1 = back to the real
  * answer (GameController, or PD_FAKE_PAD in the environment). A simulator
  * cannot pair or unpair a controller, so this is the only way a script can
- * drive the connect/disconnect path Austin reported broken (D-037). Dev
+ * drive the connect/disconnect path the user reported broken (D-037). Dev
  * instrument: nothing in the app ever calls it.
  */
 void PDTouchOverlaySetFakePad(int state);
@@ -72,7 +72,7 @@ void PDTouchOverlaySetFakePad(int state);
 
 /**
  * One recovery experiment, for the bridge's `heal <n>` (D-041 round 2). The
- * broken state has never reproduced off Austin's phone, so the candidates are
+ * broken state has never reproduced off the user's phone, so the candidates are
  * numbered and tried one at a time while he is in it. Main thread.
  */
 + (NSString *)heal:(int)which;

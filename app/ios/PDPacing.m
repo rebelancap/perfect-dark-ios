@@ -106,7 +106,7 @@ static inline uint64_t pdNowNs(void)
 		_engineTickHz = 60;
 		atomic_store(&_divisor, 1);
 		_presentAllowed = YES;
-		// D-040, measured on Austin's Air: the wait belongs at the TOP of the
+		// D-040, measured on the user's Air: the wait belongs at the TOP of the
 		// frame, not just before the present. With it here the phone holds a
 		// clean 120.0 fps with a jitter of 0.00 %; with it before the present
 		// it managed 72-79 fps and 48 % jitter, because the drawable
@@ -462,7 +462,7 @@ static void pdWakeSourcePerform(void *info)
  * reconfigured a live display link from the wrong thread, underneath
  * CoreAnimation, while the main thread is also the UIKit thread.
  *
- * That is the shape of Austin's dead touch: it survives everything observable
+ * That is the shape of the user's dead touch: it survives everything observable
  * (routing, windows, key window, the engine, the bridge), it is not the tick
  * gate (proven: the gate was already off and it still broke), and it happens
  * on a rate CHANGE rather than at a rate.
@@ -486,7 +486,7 @@ static void pdWakeSourcePerform(void *info)
 /**
  * The link's rate range, which is the PANEL's maximum and nothing else (D-043).
  *
- * It used to be the rate the PLAYER asked for, and a 60 Hz range on Austin's
+ * It used to be the rate the PLAYER asked for, and a 60 Hz range on the user's
  * 120 Hz panel is what kills UIKit touch delivery to this app. A/B'd live on
  * the phone over USB, with him tapping throughout and no relaunch between the
  * two halves: at a 60 Hz range `ui_touches_began` froze for ten seconds of
@@ -517,7 +517,7 @@ static void pdWakeSourcePerform(void *info)
 	const NSInteger maxHz = PDVisionMaxFPS();
 	// D-056: the panel's maximum, whatever it is. `maxHz >= 120 ? 120 : 60` gave
 	// this Vision Pro a 60 Hz range on a 90 Hz panel, which is the 2D half of
-	// Austin's "set to 120, locked at 60".
+	// the user's "set to 120, locked at 60".
 	const NSInteger want = PDPanelHighHz();
 	if (want == _appliedLinkHz) {
 		return;
@@ -639,7 +639,7 @@ static void pdWakeSourcePerform(void *info)
 /**
  * The wait, run on the MAIN run loop rather than blocked on the semaphore.
  *
- * D-045, proven live on Austin's phone. The game thread here IS the main
+ * D-045, proven live on the user's phone. The game thread here IS the main
  * thread, and the main thread is UIKit's event-dispatch thread: UIKit hands a
  * HID event to the window from a source on the main run loop, and that loop
  * only ever turned inside SDL's two-microsecond `UIKit_PumpEvents`. With the

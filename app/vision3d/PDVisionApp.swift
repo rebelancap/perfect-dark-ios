@@ -18,7 +18,7 @@
 // declares its own scenes below. PDSceneDelegate is compiled out of this target
 // altogether, which is deliberate — UIKit persists a scene session's
 // configuration name and delegate CLASS NAME across installs of the same
-// bundle id, so Austin's headset, which has run the Phase-5 builds, will try to
+// bundle id, so the user's headset, which has run the Phase-5 builds, will try to
 // restore a session naming PDSceneDelegate. With the class absent the lookup
 // fails and UIKit falls back to the app delegate's configuration, which is
 // SwiftUI's. That is the vkQuake/q2repro fix (NOTES-FROM-VKQUAKE), and a fresh
@@ -188,7 +188,7 @@ struct PDRootView: View {
                         pdVision3dSetMode(!model.immersive)
                     }
                     // THE GEAR, beside it, in the sibling ports' own placement
-                    // and glyph — Austin's note on 0.0.0.9 from the headset was
+                    // and glyph — the user's note on 0.0.0.9 from the headset was
                     // "you have none of the SETTINGS gear ornament, we need that
                     // just like the other ports have". So: the LAST button in
                     // the same pill (sm64coopdx SM64VisionApp.swift:185,

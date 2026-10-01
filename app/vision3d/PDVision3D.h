@@ -347,7 +347,7 @@ float pdVisionStereoGunNear(void);
  * point at view depth d carries U*(C/d - 1) of crossed disparity, which grows
  * without bound as d falls — and PD lets Joanna put her face 30 units from a
  * wall, where at the shipped defaults that is 400 px, twelve degrees, well past
- * fusion. Austin: "when you get close to a wall ... your eyes focus on the edges
+ * fusion. The user: "when you get close to a wall ... your eyes focus on the edges
  * of your gun and how it overlaps with the world around you", and "it's a
  * little disorienting even when it overlaps with the ground".
  *
@@ -415,7 +415,7 @@ void pdVisionEyeNoteCompositorFovX(float radians);
  *
  * Before this the eye was the compositor's per-view size and the panel pass
  * aspect-FIT the quad to it, so the two size rows could not change the shape of
- * the picture at all and the shipped default read as a square (Austin, device
+ * the picture at all and the shipped default read as a square (the user, device
  * round 1). A pinned PD_VP3D_EYE opts out of both: the gates need a fixed eye.
  */
 void pdVisionEyeNotePanelGeometry(float halfW, float halfH, float dist);

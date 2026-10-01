@@ -9,7 +9,7 @@ NS_ASSUME_NONNULL_BEGIN
  * How the game thread waits for the link (D-045).
  *
  * `PDPacingWaitSem` is the original: a plain `dispatch_semaphore_wait`. On the
- * MAIN thread — which is this port's game thread — that is what killed Austin's
+ * MAIN thread — which is this port's game thread — that is what killed the user's
  * touch at the 60 Hz setting, because a blocked main thread is a main run loop
  * that never turns, and UIKit dispatches its queued touches from that loop.
  *
@@ -52,7 +52,7 @@ typedef NS_ENUM(int, PDPacingWaitMode) {
  * to begin a frame less than a 60th of a second after the last one, whatever
  * the display link says. A 120 Hz link over a 60 Hz engine is the worst of both
  * worlds: every other callback finds no waiter, and the frames that do land
- * land 8.3 ms and 16.7 ms apart in an uneven mix. That is the judder Austin
+ * land 8.3 ms and 16.7 ms apart in an uneven mix. That is the judder the user
  * reported on the Air, and it is why the pacer needs to know the engine's rate
  * rather than only the panel's. PDDefaultsApplyToEngine() sets both.
  */

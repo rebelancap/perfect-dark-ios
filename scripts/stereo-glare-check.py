@@ -5,7 +5,7 @@
 
 D-060 depth-tags the two rectangles `artifact.c` draws for a light glare and
 shifts them per eye in `gfx_draw_rectangle`, so a glare lands on its fixture
-instead of on the panel in front of it. Austin, in the headset on 0.0.0.10:
+instead of on the panel in front of it. The user, in the headset on 0.0.0.10:
 *"every time i look at a light, it hurts."*
 
 THE MEASUREMENT. Three windows on one wall corner of one frozen frame, each

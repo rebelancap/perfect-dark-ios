@@ -39,7 +39,7 @@ extern NSString *const PDDefHaptics;           // bool
  * TOUCH: double-tap the stick region; the left half of the region (nearer the
  * screen edge) rolls left, the right half rolls right.
  * GAMEPAD: double-flick the LEFT stick to one side (out past 0.70, back inside
- * 0.30, out again within 300 ms). One setting for both, as Austin asked - and
+ * 0.30, out again within 300 ms). One setting for both, as the user asked - and
  * with it, R3 is no longer bound to the roll at all (PDController.m).
  *
  * Turning this on is also what turns Dab's combat roll ON in the engine
@@ -97,7 +97,7 @@ extern NSString *const PDDefTexturePacks;      // bool
 // in the eeprom and are edited in the game's own Audio Options page, which
 // rewrites all three on every game-file load. Mirroring them in this page was
 // round 1's mistake (it needed an engine callback to survive a slot change, and
-// Austin's answer was that it is not what he wants from this page anyway).
+// the user's answer was that it is not what he wants from this page anyway).
 //
 // What a phone needs INSTEAD is a volume it can reach without opening the
 // game's menus, a mute, and a policy for the player's own music - all three of
@@ -111,7 +111,7 @@ extern NSString *const PDDefAudioMute;          // bool
 
 // visionOS 3D mode (Phase 6 M6, plan §2.10). The rows of the 3D settings sheet,
 // and the family's own values from ~/dev/q2repro-ios/SETTINGS-SPEC-FROM-VKQUAKE.md
-// — a spec that went through six of Austin's own feedback rounds on vkQuake, so
+// — a spec that went through six of the user's own feedback rounds on vkQuake, so
 // the ranges and defaults are not ours to re-choose.
 //
 // LENGTHS ARE METRES, and the WIDTH and HEIGHT keys store the HALF-extent

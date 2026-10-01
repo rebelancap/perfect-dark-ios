@@ -100,7 +100,7 @@ static PDRow *pdPercentSliderRow(NSString *title, NSString *key)
  *
  * D-044's `hide60on120` insurance is unchanged and still only arms on a panel
  * above 60: with it set, the low segment goes away entirely and the player keeps
- * the panel's rate, which is the rate that works on Austin's phone.
+ * the panel's rate, which is the rate that works on the user's phone.
  */
 static PDRow *pdFrameRateRow(void)
 {
@@ -266,7 +266,7 @@ static CFTimeInterval sPresentStarted;
  * cells, their SF Symbols, their switches and segmented controls, and it pays
  * on the GAME thread, which is the main thread here — so the frame that opens
  * the page is the frame that builds the whole table, and that is the hitch
- * Austin feels the first time he reaches for the gear.
+ * the user feels the first time he reaches for the gear.
  */
 + (void)build
 {
@@ -331,7 +331,7 @@ static CFTimeInterval sPresentStarted;
  * hides the app's KEY window and then deallocates it, leaving the scene with
  * no key window at all and nothing promoted in its place. On the simulator
  * UIKit puts SDL's window back by itself and every scripted open/close came
- * back with `route_ok=1`; on Austin's phone it did not, and what he got was a
+ * back with `route_ok=1`; on the user's phone it did not, and what he got was a
  * game still rendering (the CAMetalLayer presents its own drawables and needs
  * nobody's permission) under a FROZEN UIKit layer tree — the chips as they were
  * the moment the page went up — that no longer took a touch. Force-quit was the
@@ -462,7 +462,7 @@ static CFTimeInterval sPresentStarted;
  * `settings row` presses a row through -didSelectRowAtIndexPath:, which a
  * segmented row ignores - it has no action, its control does. So until this
  * existed there was NO scripted path through the Frame rate row, which is the
- * exact row Austin's touch dies on, and "reproduce it on the simulator" could
+ * exact row the user's touch dies on, and "reproduce it on the simulator" could
  * not even be attempted honestly. Returns what it moved, or nil.
  */
 + (NSString *)setSegmentInSection:(NSString *)needle atIndex:(NSInteger)index to:(NSInteger)seg
@@ -636,7 +636,7 @@ static CFTimeInterval sPresentStarted;
 		@[
 			// The Frame rate row, and the one-line insurance behind it (D-044).
 			//
-			// 120 -> 60 on Austin's 120 Hz phone has wedged the app on every
+			// 120 -> 60 on the user's 120 Hz phone has wedged the app on every
 			// build since round P, and the cause is not found yet. If round S's
 			// instruments do not name it, `pd.video.hide60on120` (registered NO,
 			// flipped by the bridge's `hide60 on`) takes the 60 segment off the
@@ -667,7 +667,7 @@ static CFTimeInterval sPresentStarted;
 			pdSwitchRow(@"Show FPS", PDDefShowFPS),
 		],
 		@[
-			// Austin: "the main point is the game volume and the Other App Audio
+			// the user: "the main point is the game volume and the Other App Audio
 			// option". Three rows, bean's three, in his order (D-033). The
 			// game's own Sound / Music / Sound Mode are the eeprom's and stay in
 			// the game's own Audio Options page - mirroring them here is what

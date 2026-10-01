@@ -60,7 +60,7 @@ extern void *pdAngleGetHostView(void);
 // This is the routing UIKit itself does: every window of every window scene,
 // highest windowLevel first, skipping the ones that cannot take a touch, and
 // the first whose -hitTest: answers wins. If that window is not SDL's, a
-// finger on a chip lands somewhere else - which is exactly what Austin saw.
+// finger on a chip lands somewhere else - which is exactly what the user saw.
 
 /** Every window this process owns, highest level first. */
 static NSArray<UIWindow *> *pdAllWindows(void)
@@ -170,7 +170,7 @@ static const int kRollPressEnd    = 5;   // ...and when it comes back up
 // mask bits are CK_ bit positions, which are also the CONT_ values
 // (include/PR/os_cont.h, port/include/input.h).
 //
-// GLYPHS ONLY (D-032, Austin 2026-09-14: "NO WORDS LIKE I SAID"). The table,
+// GLYPHS ONLY (D-032, the user 2026-09-14: "NO WORDS LIKE I SAID"). The table,
 // the glyphs, the radii and the positions are GoldenEye's - bean's
 // touch_overlay_uikit.mm:388-412, which are HIS tuned layout exported off his
 // own device after real play, not a guess. Positions are unit coordinates of
@@ -250,7 +250,7 @@ static const PDButtonSpec kMenuButtons[] = {
  * setting, a translucent fill only while it is held, and the glyph at rather
  * more than the ring's alpha (min(alpha * 2.2, 1)) so the figure reads at an
  * opacity that would make a filled disc invisible. No label: the glyph is the
- * face (Austin, 2026-09-14).
+ * face (the user, 2026-09-14).
  */
 - (instancetype)initWithSpec:(const PDButtonSpec *)spec
                        scale:(CGFloat)scale
@@ -358,14 +358,14 @@ static const PDButtonSpec kMenuButtons[] = {
 
 	// Live touch tracking.
 	//
-	// STRONG, not weak, and that is the fix for Austin's stuck stick (D-034).
+	// STRONG, not weak, and that is the fix for the user's stuck stick (D-034).
 	// A UITouch is owned by the UIEvent that carried it and UIKit recycles both;
 	// nothing promises the object outlives the gesture, so a __weak reference
 	// can read back nil at any point between touchesBegan: and touchesEnded:.
 	// When it did, `t == _stickTouch` compared a live touch against nil, the
 	// lift never ran, and the stick stayed drawn on screen with its last value
 	// still being published - a player running forward into a wall with no way
-	// to stop (Austin, on device, 0.0.0.6). Holding the touch retains one small
+	// to stop (the user, on device, 0.0.0.6). Holding the touch retains one small
 	// object per finger for the length of a gesture, every path nils it on the
 	// way out, and the per-frame watchdog below catches anything that does not.
 	UITouch *_stickTouch;
@@ -425,7 +425,7 @@ static const PDButtonSpec kMenuButtons[] = {
 	// (bean, AttachTouchOverlay). It has to be: this view hides itself when a
 	// pad connects or when the controls are turned off, and a hidden view's
 	// subviews receive nothing — which is exactly why there was no way to reach
-	// Settings in the headset, where a pad is usually paired (Austin, 0.0.0.5).
+	// Settings in the headset, where a pad is usually paired (the user, 0.0.0.5).
 	UIButton *_gear;
 	CFTimeInterval _gameplaySince;
 	CGFloat _scale;
@@ -460,7 +460,7 @@ static const PDButtonSpec kMenuButtons[] = {
 	// The routing watchdog's latch: one report per episode, not one a second
 	// (D-041).
 	BOOL _routeWasWrong;
-	// D-041 round 2: proof that UIKit is DELIVERING anything at all. Austin's
+	// D-041 round 2: proof that UIKit is DELIVERING anything at all. The user's
 	// second report had route_ok=1 and the watchdog silent - the routing was
 	// fine and the touches never arrived - so the next question is not "where
 	// would a touch go" but "did one ever come". -hitTest:withEvent: is called
@@ -563,7 +563,7 @@ static __weak PDTouchOverlay *sCurrent;
 	// that was already paired at launch never generates another notification.
 	// So the chips stayed on screen through the whole intro with a controller
 	// connected and only vanished when something else happened to push the flag
-	// (Austin, on device, 0.0.0.6). The overlay asks GameController itself the
+	// (the user, on device, 0.0.0.6). The overlay asks GameController itself the
 	// moment it exists, which is also the first moment it could be seen.
 	v.padConnected = PDTouchOverlayAnyPadConnected();
 	[window addSubview:v];
@@ -1102,7 +1102,7 @@ static CGPoint pdUnitForLabel(NSString *label, CGPoint def)
 /**
  * Coming back from hidden, make sure the layer can be touched at all (D-037).
  *
- * Austin, on 0.0.0.7 with a pad: "when I REMOVE the gamepad, touch controls
+ * The user, on 0.0.0.7 with a pad: "when I REMOVE the gamepad, touch controls
  * should come back. they did come back after about 5+ seconds, but then none of
  * them worked. I had to force quit and relaunch." A view that is visible but
  * unreachable has exactly three causes, and none of them is visible in a
@@ -1150,7 +1150,7 @@ static CGPoint pdUnitForLabel(NSString *label, CGPoint def)
 	// The ROUTING check (D-041), and the one the three above could never make:
 	// all of them are questions about the inside of SDL's window, and a touch
 	// that is delivered to some OTHER window fails none of them. Round Q
-	// shipped those three, they did not fire, and Austin's touch was still
+	// shipped those three, they did not fire, and the user's touch was still
 	// dead - because the settings page's own UIWindow had been made key and
 	// then deallocated, and what was left took the event.
 	if (win && !PDSettingsViewController.isPresented) {
@@ -1265,7 +1265,7 @@ static CGPoint pdUnitForLabel(NSString *label, CGPoint def)
  *
  * This is the instrument the last two rounds lacked. `hit X Y` answers from the
  * overlay's own model and is right even when nothing on screen can be touched;
- * `state` reports the layer's flags, which were all correct while Austin's
+ * `state` reports the layer's flags, which were all correct while the user's
  * phone ignored every finger. Only a hit test taken from the WINDOW follows the
  * route a real touch takes, across window ordering, hidden windows and a key
  * window that has gone missing - and only that can be compared before and after
@@ -1361,7 +1361,7 @@ static CGPoint pdUnitForLabel(NSString *label, CGPoint def)
 	[s appendFormat:@"route_ok=%d\n", (int)ok];
 
 	// Delivery, which is a different question from routing (D-041 round 2).
-	// Austin's second report: route_ok=1, the watchdog silent, and not one
+	// The user's second report: route_ok=1, the watchdog silent, and not one
 	// touch reaching the game. So these are the counters that say whether
 	// UIKit handed anything over at all, and the app-wide gate that can stop
 	// it doing so.
@@ -1401,7 +1401,7 @@ static CGPoint pdUnitForLabel(NSString *label, CGPoint def)
 /**
  * The recovery experiments, for the bridge's `heal <n>` (D-041 round 2).
  *
- * Austin's phone gets into a state where the routing is provably right and no
+ * The user's phone gets into a state where the routing is provably right and no
  * touch is ever delivered, and it did not reproduce on a simulator in three
  * rounds of trying. So rather than guess which recovery is the right one, each
  * candidate is a number: when he is IN the broken state, over USB, we try them
@@ -1505,7 +1505,7 @@ static CGPoint pdUnitForLabel(NSString *label, CGPoint def)
  * is hidden because a pad is connected. It used to be a line in -publish, and
  * +publishInput returns before -publish whenever the layer is hidden - so the
  * gear froze at whatever it was the instant the controller connected, which on
- * a pad player mid-mission is "hidden", for ever. That is Austin's "when I
+ * a pad player mid-mission is "hidden", for ever. That is the user's "when I
  * pause the game on gamepad, the iOS settings button does not show": the
  * predicate was right and was simply never asked again.
  */
@@ -2078,7 +2078,7 @@ static CGVector pdStickCurve(CGVector raw)
 
 	// The routing watchdog (D-041). Round Q asserted the three things that can
 	// make a VISIBLE view unreachable from inside its own window, and asserted
-	// them only when the layer came back from hidden - and Austin's touch died
+	// them only when the layer came back from hidden - and the user's touch died
 	// on a layer that was never hidden, for a reason that is one level up:
 	// UIKit was routing his finger to a different window. Once a second is
 	// often enough to catch it within a moment of it happening and cheap
@@ -2201,7 +2201,7 @@ static CGVector pdStickCurve(CGVector raw)
  * lifted as if the callback had arrived, and the fact is written to
  * Documents/touch-watchdog.txt with what was held.
  *
- * It is a diagnostic as much as a fix. If Austin ever sees the stick stick
+ * It is a diagnostic as much as a fix. If the user ever sees the stick stick
  * again, that file says which control it was, what phase the touch was in, and
  * how long ago the finger actually left - which is the evidence this round did
  * not have.
@@ -2404,7 +2404,7 @@ static CGVector pdStickCurve(CGVector raw)
 		// "Game Pak" reliably selected "Cancel". A finger is down for at least
 		// three frames, so nothing is lost by spending one of them aiming.
 		// "Moved" has to have SLOP, and its absence was a second bug in
-		// Austin's report (D-043): a real fingertip jitters by a fraction of a
+		// the user's report (D-043): a real fingertip jitters by a fraction of a
 		// point every frame it is down, so an exact CGPointEqualToPoint test is
 		// false on EVERY frame and the click is suppressed for ever - the
 		// highlight follows the finger and nothing is ever chosen. An injected

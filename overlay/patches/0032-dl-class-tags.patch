@@ -5,7 +5,7 @@ D-055, and the engine half of patch 0030's fold.
 The visionOS stereo fold needs to know WHAT a projection is for, because the
 three shapes PD hands the renderer need three different eye offsets. D-049
 recovered that from the SHAPE of the matrix. On the simulator with N64 art that
-read world 187440 / sky 1540 / gun 104 and looked right; on Austin's headset
+read world 187440 / sky 1540 / gun 104 and looked right; on the user's headset
 with the XBLA release on it read
 
     stereo_cls_world=2266415  stereo_cls_sky=2290014  stereo_cls_gun=247990
@@ -15,7 +15,7 @@ subject: PD's lists multiply into the projection (G_MTX_MUL with
 G_MTX_PROJECTION) and 4J's mesh lists do it constantly, after which the product
 is no longer axis-aligned and the shape test calls it sky. Half the geometry in
 the room took the skew-only path, so half of it had no eye offset - two depths
-for one scene, which is what Austin reported three separate ways (bodies
+for one scene, which is what the user reported three separate ways (bodies
 floating above the floor, doors looking wrong, ramps "trippy, depth off").
 
 So the engine says it instead, and this patch is that: a TAGGED G_NOOP naming
@@ -71,7 +71,7 @@ index 14caa7eab..b70cbac13 100644
 +	// model, the hudpiece uses the world's, and the health bar is drawn in the
 +	// world projection inside this very span. Five projections, one dialog — so
 +	// this is a SPAN and not a projection class, and it is the span that reaches
-+	// all five. Austin, in the headset on 0.0.0.9: "pause menu has depth
++	// all five. The user, in the headset on 0.0.0.9: "pause menu has depth
 +	// intersecting the world".
 +	gDPPdDlTag(gdl++, PD_DLSPAN_FLAT_BEGIN);
 +#endif
@@ -106,7 +106,7 @@ index d82681671..3e03df788 100644
 +/* of the projection matrix, and that guess broke on 4J's XBLA art: the      */
 +/* device counters came back world 2.27M / sky 2.29M / gun 248k, a sky count */
 +/* equal to the world count, and half the geometry got the wrong offset —    */
-+/* which is what Austin saw in the headset as bodies floating above the      */
++/* which is what the user saw in the headset as bodies floating above the      */
 +/* floor and ramps reading "trippy, depth off".                             */
 +/*                                                                          */
 +/* So the engine says it instead. These are TAGGED G_NOOPs (gbi.h:3826):     */

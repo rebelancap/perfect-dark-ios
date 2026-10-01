@@ -1,7 +1,7 @@
 Subject: lv: draw the FPS readout as a whole number
 
 Upstream's Show FPS draws "59.83" — two decimals of a one-second average, in
-the N64 numeric font, in the top-left corner of a phone screen. Austin, on
+the N64 numeric font, in the top-left corner of a phone screen. The user, on
 device (2026-09-14): "the fps shows 2 decimal points. whole numbers only."
 
 Two decimals are noise at any refresh rate a panel can show, and on a 390-point

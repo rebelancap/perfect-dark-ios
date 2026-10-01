@@ -170,7 +170,7 @@ static _Atomic(int) s_compFovMilliRad;
 // Width / Screen Height rows say. Taking the view's size gave the device a
 // 5080x4080 eye — 20.7 Mpx at aspect 1.245, nearly SQUARE — and the panel pass
 // then aspect-FIT the quad to it, so the two width/height rows could not change
-// the picture's shape at all and the default read as a square. Austin's words:
+// the picture's shape at all and the default read as a square. The user's words:
 // "the 3d screen settings don't actually change the screen size. and whatever
 // default you picked is more of a SQUARE screen which is a silly choice."
 //
@@ -209,13 +209,13 @@ static volatile float s_cmtDist    = 3.6f;
 #define PD_EYE_BUDGET_DIM 2560
 // D-062: the budget is an AREA, not a width.
 //
-// Austin, after 0.0.0.11: "people should be able to go even wider than that if
+// The user, after 0.0.0.11: "people should be able to go even wider than that if
 // they want. though it will impact their FPS." The Screen Width row now reaches
 // 40 ft — and a cap on the LARGER DIMENSION punishes exactly that: a 40 x 12 ft
 // panel is 118.9 deg wide, wants 5073 px across, and a 2560 cap hands it
 // 2560x768, which is 2.0 Mpx. Half the budget's pixels, for the widest panel on
 // the row. Wider would have been BLURRIER and not slower, which is the opposite
-// of what Austin was told the trade is.
+// of what the user was told the trade is.
 //
 // So the clamp is on the pixel COUNT, which is what the footprint and the fill
 // rate are actually made of, and the shape is left to the panel. The default
@@ -747,7 +747,7 @@ void pdVisionStereoNoteGunDepth(float depth)
 // grip and the wrong one for everything in front of it: the barrel, the sights
 // and the muzzle all sat NEARER than the convergence plane, so they carried
 // CROSSED disparity and popped out of the panel - in front of an ammo HUD that
-// is 2D, at zero disparity, and drawn over them. Austin: "the gun goes behind
+// is 2D, at zero disparity, and drawn over them. The user: "the gun goes behind
 // the ammo hud, but the gun, depth wise, is much closer to me, so a little
 // disorienting. HUD should probably be closest to me?"
 //
@@ -994,7 +994,7 @@ int pdVisionStereoFold(float *outOffset, float *outConvergence, float *outGunCon
 void pdVisionStereoSetDepthPct(float pct)
 {
 	if (pct < 0.0f) pct = 0.0f;
-	if (pct > 300.0f) pct = 300.0f;   // D-061: the row's ceiling, Austin's number
+	if (pct > 300.0f) pct = 300.0f;   // D-061: the row's ceiling, the user's number
 	s_depthPct = pct;
 	NSLog(@"perfectdark: [3d] stereo depth %.0f %% (half-sep %.2f units)",
 		(double)pct, (double)(PD_STEREO_HALFSEP * pct / 100.0f));

@@ -2,7 +2,7 @@
 //
 // Plan §2.10, and its rows/ranges/defaults/wording are
 // ~/dev/q2repro-ios/SETTINGS-SPEC-FROM-VKQUAKE.md — a spec that went through
-// six of Austin's own feedback rounds on vkQuake and was then shipped twice
+// six of the user's own feedback rounds on vkQuake and was then shipped twice
 // (vkQuake, q2repro). Nothing here is ours to re-choose; what IS ours is the
 // machinery, and that is deliberately the SAME machinery as the 2D page:
 // NSUserDefaults is the truth (PDDefaults.h `vp3d.*`), one row descriptor per
@@ -86,7 +86,7 @@ typedef NS_ENUM(NSInteger, PDVRowKind) {
 
 // ---------------------------------------------------------------------------
 // Units. Lengths are stored in METRES and shown in whatever the Units row says
-// (ft by default — the family's choice, and Austin's).
+// (ft by default — the family's choice, and the user's).
 // ---------------------------------------------------------------------------
 
 static BOOL pdVFeet(void) { return PDDefBool(PDDef3DUnitsFeet); }
@@ -427,7 +427,7 @@ static PDVRow *pdVInfo(NSString *title, NSString *name, NSString *(^info)(void))
 			// and an L/R pair must come out pixel-identical.
 			pdVSlider(@"Stereo Depth", @"depth", PDDef3DStereoDepthPct, 0.0f, 300.0f,
 				^NSString *(float v) { return [NSString stringWithFormat:@"%.0f%%", v]; }),
-			// RENAMED from "Crosshair Distance" (D-064). That was Austin's own
+			// RENAMED from "Crosshair Distance" (D-064). That was the user's own
 			// coinage and the family's shipped label (q2repro's SETTINGS-SPEC:
 			// "after living with 'focus distance' he coined this and it
 			// stuck"), and it was exactly right while the reticle LIVED on this

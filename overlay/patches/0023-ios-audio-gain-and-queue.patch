@@ -11,7 +11,7 @@ so every other platform is byte for byte upstream's.
 
 2. A queue instrument. audioEndFrame() queues ONE rendered frame's samples per
    frame while the device drains on the clock, so a load hitch is a production
-   gap with nothing banked behind it. That is Austin's intro stutter, and no
+   gap with nothing banked behind it. That is the user's intro stutter, and no
    counter this port had could see it. g_PdAudio* are read over the bridge,
    including what SDL actually opened and the samples per push.
 
@@ -27,7 +27,7 @@ so every other platform is byte for byte upstream's.
    show: the sawtooth's floor is below a device buffer by construction, so the
    top-up fired on every pull and inserted 56 ms of silence three times a second
    for the whole session (1340 refills, 1.66 M samples of silence in five
-   minutes on Austin's Air). It IS the stutter he reported. The cushion is laid
+   minutes on the user's Air). It IS the stutter he reported. The cushion is laid
    once now, and re-laid only after the queue has actually reached zero (D-035).
 
 diff --git a/port/src/audio.c b/port/src/audio.c
@@ -116,12 +116,12 @@ index 791b5f8ab..1872f1415 100644
 + * Audio.RateMatch - resample the frame's audio to the rate the DEVICE actually
 + * consumes at, instead of the rate the engine thinks it produces at (D-039).
 + *
-+ * Measured on Austin's iPhone Air over 8.1 minutes (M-036): the engine pushes
++ * Measured on the user's iPhone Air over 8.1 minutes (M-036): the engine pushes
 + * 368 samples 60.0 times a second = 22,080 samples/s, and the device consumes
 + * 22,851 samples/s - **3.5 % faster**, steadily, for ever. Any fixed cushion is
 + * therefore eaten at a fixed rate (a 2048-sample one lasts 2.65 s, measured),
 + * and every mitigation that re-queues silence just makes the gaps longer
-+ * instead of more frequent. Austin could still hear it.
++ * instead of more frequent. The user could still hear it.
 + *
 + * The engine cannot be asked to produce at a different rate: the N64 audio
 + * manager is hard-wired to 22020 (audiomgr.c:64, osAiSetFrequency(22020)), and

@@ -19,7 +19,7 @@ THE ROI RULE CHANGED WITH D-061, and this is the new one. D-060's was "no gun
 block may be POSITIVE", because the viewmodel converged at its own nearest
 vertex and therefore sat at the panel or behind it. That was right for the ammo
 HUD and wrong for the world: PD clears depth before bgunRender, so the gun is
-PAINTED OVER a floor or wall that stereo was placing in front of it, and Austin
+PAINTED OVER a floor or wall that stereo was placing in front of it, and the user
 read the contradiction as "disorienting, and disorienting often". D-061 clamps
 the world's crossed disparity at U*2 and moves the viewmodel rigidly forward to
 U*2.25..U*3.25, so the invariant this script now asserts is

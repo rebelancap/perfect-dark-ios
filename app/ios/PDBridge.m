@@ -478,7 +478,7 @@ static NSString *pdErr(NSString *fmt, ...)
 	// drops the player into a level without running the mission's loadout, so
 	// every 3D gate before dev1 ran UNARMED, PD draws no viewmodel when unarmed,
 	// and "the gun is invisible in 3D" therefore could not be seen on a
-	// simulator at all. Austin found it in the headset instead.
+	// simulator at all. The user found it in the headset instead.
 	//
 	// WEAPON_FALCON2 is 2 (constants.h:4653); anything the enum knows works.
 	if ([cmd isEqualToString:@"give"]) {
@@ -590,7 +590,7 @@ static NSString *pdErr(NSString *fmt, ...)
 		return [PDPacing.shared report];
 	}
 
-	// A continuous synthetic touch stream: the touch-vs-pad comparison Austin
+	// A continuous synthetic touch stream: the touch-vs-pad comparison the user
 	// made, run from a script. `stream X Y DX DY N MS`.
 	if ([cmd isEqualToString:@"stream"]) {
 		if (argv.count < 7) {
@@ -662,7 +662,7 @@ static NSString *pdErr(NSString *fmt, ...)
 
 	// --- round Q (D-037): the two `pad` sub-commands a simulator needs --------
 	// A simulator cannot be handed or taken away a controller, and injected
-	// events bypass UIKit, so the two things Austin reported - the gear on a
+	// events bypass UIKit, so the two things the user reported - the gear on a
 	// pad pause, and the touch layer coming back dead when the pad is unplugged
 	// - have no script at all without these. Both drive the REAL paths: `fake`
 	// runs the same -padsChanged: the connect/disconnect notifications run, and
@@ -788,7 +788,7 @@ static NSString *pdErr(NSString *fmt, ...)
 	// window, so it is the one command that can see a routing failure. Run it
 	// either side of a transition (settings open/close, a pad connect, the
 	// layout editor) and compare `route_ok`.
-	// The numbered recovery experiments (D-041 round 2). Austin's phone reaches
+	// The numbered recovery experiments (D-041 round 2). The user's phone reaches
 	// a state where route_ok=1 and no touch is ever delivered; it has never
 	// reproduced anywhere else. Rather than guess the cause, each candidate
 	// recovery is a number, tried one at a time over USB while he is IN the

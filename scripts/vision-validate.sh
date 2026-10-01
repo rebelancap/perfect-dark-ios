@@ -323,7 +323,7 @@ PACE_ENGINE="$(get pacing_engine_hz)"
 # D-043: the engine's tick gate is OFF on iOS and visionOS at EVERY rate. It
 # used to be asserted as 1 at 60 Hz (D-034); that setting parks the main thread
 # in nanosleep() at the top of the frame and is implicated in the touch-delivery
-# failure Austin hit three builds running.
+# failure the user hit three builds running.
 TICKDIV="$(bridge 'cfg get Game.TickRateDivisor')"
 case "$TICKDIV" in
 	Game.TickRateDivisor=0) ;;

@@ -42,7 +42,7 @@ static NSString *const kLegacyDir  = @"xbla";
 static NSString *const kCacheSub   = @"xbla";      // cache/xbla, patch 0009 -> Caches/xbla
 static NSString *const kDoneFile   = @".extracted";
 // overlay/patches/0001-xbla-import-scan-depth.patch raises XBLAIMPORT_SCAN_DEPTH
-// from 2 to 4, because Austin's .rar stores the package four names deep
+// from 2 to 4, because the user's .rar stores the package four names deep
 // (Perfect Dark/584109C2/000D0000/<content id>). Scanning shallower here than
 // the engine does would mean the onboarding screen saying "nothing found"
 // about a copy the engine goes on to use.

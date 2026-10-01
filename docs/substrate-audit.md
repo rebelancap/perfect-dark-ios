@@ -400,7 +400,7 @@ honest runtime target is the **iOS simulator on lane 3 (iPhone 17e, iOS
 is complete under ANGLE-Metal, the screenshot instrument survives P4, and
 the whole thing presents. Artifact: a content screenshot of the title
 screen, diffed against the oracle's.
-**If Austin prefers the oracle strictly**, the alternative is
+**If the user prefers the oracle strictly**, the alternative is
 `build-angle-ios.sh` re-pointed at `target_os="mac"` first — add 2–4 h
 mostly unattended, and one more ANGLE tree on a drive that has been
 burned before.

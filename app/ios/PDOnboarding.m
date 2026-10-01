@@ -22,7 +22,7 @@
 #include <CommonCrypto/CommonDigest.h>
 
 // The one hash we can stand behind: charter §What this is, verified against
-// Austin's own copy. The other three variants are NOT identified by hash here -
+// the user's own copy. The other three variants are NOT identified by hash here -
 // we have no verified md5 for them, and a wrong constant would tell a player
 // their good ROM is a bad one. They are identified by the cartridge header
 // instead, which is what upstream checks too (romdata.c:29-46).

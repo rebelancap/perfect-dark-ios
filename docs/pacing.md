@@ -110,7 +110,7 @@ frame.**
 - ~~The tick gate inside `pdmain.c`/`timing.c`.~~ **Superseded by D-034
   (round C).** The sentence below was wrong in the one case that mattered: with
   `Game.TickRateDivisor` at its default 1 the tick gate is *exactly* the binding
-  constraint on a 120 Hz panel, and it capped Austin's Air at 60 fps while the
+  constraint on a 120 Hz panel, and it capped the user's Air at 60 fps while the
   link ran at 120. `PDDefaultsApplyToEngine()` now sets the divisor to 0 when
   the target is 120 and 1 when it is 60, and `PDPacing` is told the engine's
   rate as well as the panel's so it can divide the link down when the two cannot

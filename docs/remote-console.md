@@ -223,7 +223,7 @@ the queue, the parse and the frame-hook consumption — everything that is ours.
                    pair must come out pixel-identical
 3d gunconv <units> override the gun's convergence (0 = its own znear, 1.5).
                    The ONE A/B round the plan allows (§2.4); this row goes
-                   once Austin has answered Q-020
+                   once the user has answered Q-020
 3d park            shrink the 2D window to the 480-pt card by hand. The park
 3d unpark          normally happens on its own, 1.5 s after the space finishes
                    opening, and is undone BEFORE the dismissal (M4) - these two
