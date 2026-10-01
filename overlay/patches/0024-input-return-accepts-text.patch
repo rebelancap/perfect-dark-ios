@@ -16,9 +16,11 @@ app/ios/pd_ios_main.m, which is what actually lowers the keyboard.
 Not PLATFORM_IOS-guarded: Return accepting a text field is right everywhere, and
 this is on the list of fixes to offer upstream (Q-002).
 
+diff --git a/port/src/input.c b/port/src/input.c
+index 6bc04fec8..e0dc3d5cb 100644
 --- a/port/src/input.c
 +++ b/port/src/input.c
-@@ -1630,6 +1630,19 @@
+@@ -2165,6 +2165,19 @@ s32 inputTextHandler(char *out, const u32 outSize, s32 *curCol, s32 oskCharsOnly
  		}
  	} else if (key == VK_ESCAPE) {
  		return -1;

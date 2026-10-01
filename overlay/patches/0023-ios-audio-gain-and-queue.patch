@@ -30,9 +30,11 @@ so every other platform is byte for byte upstream's.
    minutes on Austin's Air). It IS the stutter he reported. The cushion is laid
    once now, and re-laid only after the queue has actually reached zero (D-035).
 
+diff --git a/port/src/audio.c b/port/src/audio.c
+index 791b5f8ab..1872f1415 100644
 --- a/port/src/audio.c
 +++ b/port/src/audio.c
-@@ -15,6 +15,292 @@
+@@ -15,6 +15,292 @@ static s32 bufferSize = 512;
  static s32 queueLimit = 8192;
  static s32 sampleRate = 22020;
  
@@ -325,7 +327,7 @@ so every other platform is byte for byte upstream's.
  s32 audioInit(void)
  {
  	if (SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) {
-@@ -22,6 +308,21 @@
+@@ -22,6 +308,21 @@ s32 audioInit(void)
  		return -1;
  	}
  
@@ -347,7 +349,7 @@ so every other platform is byte for byte upstream's.
  	SDL_AudioSpec want, have;
  	SDL_zero(want);
  	want.freq = 22020; // TODO: this might cause trouble for some platforms
-@@ -38,10 +339,32 @@
+@@ -38,10 +339,32 @@ s32 audioInit(void)
  		return -1;
  	}
  
@@ -380,7 +382,7 @@ so every other platform is byte for byte upstream's.
  	return 0;
  }
  
-@@ -69,12 +392,53 @@
+@@ -69,12 +392,53 @@ void audioSetNextBuffer(const s16 *buf, u32 len)
  void audioEndFrame(void)
  {
  	if (nextBuf && nextSize) {
@@ -435,7 +437,7 @@ so every other platform is byte for byte upstream's.
  		nextBuf = NULL;
  		nextSize = 0;
  	}
-@@ -84,4 +448,9 @@
+@@ -84,4 +448,9 @@ PD_CONSTRUCTOR static void audioConfigInit(void)
  {
  	configRegisterInt("Audio.BufferSize", &bufferSize, 0, 1 * 1024 * 1024);
  	configRegisterInt("Audio.QueueLimit", &queueLimit, 0, 1 * 1024 * 1024);

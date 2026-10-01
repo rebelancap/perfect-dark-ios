@@ -16,14 +16,14 @@ so it is the one the shell asks.
 Read-only, entirely inside PLATFORM_IOS, called from the shell's frame hook like
 every other engine read.
 
+diff --git a/src/game/player.c b/src/game/player.c
+index b6e5ef360..79992e6d9 100644
 --- a/src/game/player.c
 +++ b/src/game/player.c
-@@ -7602,5 +7602,79 @@
- 		sp40.m[3][2] -= g_Vars.currentplayer->globaldrawworldoffset.z;
- 
+@@ -8716,3 +8716,77 @@ void player0f0c3320(Mtxf *matrices, s32 count)
  		mtxF2L(&sp40, matrices + i);
-+	}
-+}
+ 	}
+ }
 +
 +#ifdef PLATFORM_IOS
 +/**
@@ -41,7 +41,7 @@ every other engine read.
 +
 +	if (!p || !p->prop) {
 +		return 0;
- 	}
++	}
 +
 +	if (x) *x = p->prop->pos.x;
 +	if (y) *y = p->prop->pos.y;
@@ -96,5 +96,5 @@ every other engine read.
 +	}
 +
 +	return p->insightaimmode ? 1 : 0;
- }
++}
 +#endif

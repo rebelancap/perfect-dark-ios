@@ -27,10 +27,36 @@ The two paths come from the environment (PD_IOS_DOCUMENTS / PD_IOS_CACHES),
 which the shell sets before it calls the engine. That keeps the engine free of
 Foundation and keeps this plain C.
 
+diff --git a/port/include/system.h b/port/include/system.h
+index 981fef3c0..63ad43567 100644
+--- a/port/include/system.h
++++ b/port/include/system.h
+@@ -7,6 +7,7 @@ extern "C" {
+ 
+ #include <stdint.h>
+ #include <PR/ultratypes.h>
++#include "platform.h"
+ 
+ enum LogLevel {
+   LOG_NOTE,
+@@ -44,6 +45,12 @@ s32 sysRestartRequested(void);
+ void sysGetExecutablePath(char *outPath, const u32 outLen);
+ void sysGetHomePath(char *outPath, const u32 outLen);
+ 
++#ifdef PLATFORM_IOS
++// Set by the iOS shell in the environment before pdEngineMain(); see system.c.
++const char *sysIosDocumentsPath(void);
++const char *sysIosCachesPath(void);
++#endif
++
+ void *sysMemAlloc(const u32 size);
+ void *sysMemZeroAlloc(const u32 size);
+ void *sysMemRealloc(void *ptr, const u32 newSize);
 diff --git a/port/src/fs.c b/port/src/fs.c
+index af913c8d7..05684af6f 100644
 --- a/port/src/fs.c
 +++ b/port/src/fs.c
-@@ -44,6 +44,9 @@
+@@ -44,6 +44,9 @@ static s32 portable;
  static char saveDir[FS_MAXPATH + 1]; // replaces $S
  static char homeDir[FS_MAXPATH + 1]; // replaces $H
  static char exeDir[FS_MAXPATH + 1];  // replaces $E
@@ -40,7 +66,7 @@ diff --git a/port/src/fs.c b/port/src/fs.c
  
  static s32 fsPathIsWritable(const char *path)
  {
-@@ -100,6 +103,9 @@
+@@ -100,6 +103,9 @@ const char *fsFullPath(const char *relPath)
  			case 'M': expStr = numModDirs ? modDirs[0] : NULL; break;
  			case 'B': expStr = baseDir; break;
  			case 'S': expStr = saveDir; break;
@@ -50,11 +76,10 @@ diff --git a/port/src/fs.c b/port/src/fs.c
  			default: break;
  		}
  		if (expStr) {
-@@ -350,6 +356,14 @@
- s32 fsInit(void)
+@@ -351,6 +357,14 @@ s32 fsInit(void)
  {
  	sysGetExecutablePath(exeDir, FS_MAXPATH);
-+
+ 
 +#ifdef PLATFORM_IOS
 +	// Caches: not backed up, purgeable by the OS, and re-created by the app.
 +	// cache/xbla is 250MB of regenerable unpack and has no business in the
@@ -62,10 +87,11 @@ diff --git a/port/src/fs.c b/port/src/fs.c
 +	strncpy(cacheDir, sysIosCachesPath(), FS_MAXPATH);
 +	cacheDir[FS_MAXPATH] = '\0';
 +#endif
- 
++
  	// if this is set, default to exe path for everything
  	portable = sysArgCheck("--portable");
-@@ -364,6 +378,17 @@
+ 	if (portable) {
+@@ -364,6 +378,17 @@ s32 fsInit(void)
  	if (!path) {
  		// check if there's a `data` directory in working directory or homeDir, otherwise default to exe directory
  		path = "$E/" DEFAULT_BASEDIR_NAME;
@@ -83,7 +109,7 @@ diff --git a/port/src/fs.c b/port/src/fs.c
  		if (!portable) {
  			if (fsFileSize("./" DEFAULT_BASEDIR_NAME) >= 0) {
  				path = "./" DEFAULT_BASEDIR_NAME;
-@@ -374,6 +399,10 @@
+@@ -374,6 +399,10 @@ s32 fsInit(void)
  	}
  	strncpy(baseDir, fsFullPath(path), FS_MAXPATH);
  
@@ -94,7 +120,7 @@ diff --git a/port/src/fs.c b/port/src/fs.c
  	// get paths to the mod dirs and expand them if needed
  	// mod directories are overlaid on top of the base directory, in order
  	{
-@@ -404,6 +433,15 @@
+@@ -404,6 +433,15 @@ s32 fsInit(void)
  	// get path to save dir and expand it if needed
  	path = sysArgGetString("--savedir");
  	if (!path) {
@@ -110,15 +136,13 @@ diff --git a/port/src/fs.c b/port/src/fs.c
  		if (portable) {
  			path = "$E";
  		} else {
-@@ -696,10 +734,23 @@
+@@ -703,9 +741,22 @@ void fsFileFree(FILE *f)
  s32 fsChooseOutputDir(const char *name, char *dst, u32 dstSize)
  {
  	static const char *const roots[] = { "$E", "$S" };
 +	const char *const *rootv = roots;
 +	u32 rootc = sizeof(roots) / sizeof(roots[0]);
- 
--	for (u32 i = 0; i < sizeof(roots) / sizeof(roots[0]); i++) {
--		snprintf(dst, dstSize, "%s/%s", roots[i], name);
++
 +#ifdef PLATFORM_IOS
 +	// Everything else the player made goes in Documents, which is $E and $S
 +	// both. cache/ is the exception: regenerable, large, and purgeable, so it
@@ -130,16 +154,18 @@ diff --git a/port/src/fs.c b/port/src/fs.c
 +	}
 +#endif
  
+-	for (u32 i = 0; i < sizeof(roots) / sizeof(roots[0]); i++) {
+-		snprintf(dst, dstSize, "%s/%s", roots[i], name);
 +	for (u32 i = 0; i < rootc; i++) {
 +		snprintf(dst, dstSize, "%s/%s", rootv[i], name);
-+
+ 
  		// Existing and not a directory is not worth working around: it is
  		// somebody's file, and the next root will do.
- 		if (fsFileSize(dst) < 0 && fsCreateDir(dst) != 0) {
 diff --git a/port/src/system.c b/port/src/system.c
+index fffbe04b9..22f137f0f 100644
 --- a/port/src/system.c
 +++ b/port/src/system.c
-@@ -61,8 +61,43 @@
+@@ -63,8 +63,43 @@ static char logPath[2048];
  static s32 sysArgc;
  static const char **sysArgv;
  
@@ -183,7 +209,7 @@ diff --git a/port/src/system.c b/port/src/system.c
  	// figure out where the log is and clear it
  	// try working dir first
  	snprintf(logPath, sizeof(logPath), "./%s", fname);
-@@ -353,6 +388,15 @@
+@@ -381,6 +416,15 @@ s32 sysRestartRequested(void)
  
  void sysGetExecutablePath(char *outPath, const u32 outLen)
  {
@@ -199,7 +225,7 @@ diff --git a/port/src/system.c b/port/src/system.c
  	// try asking SDL
  	char *sdlPath = SDL_GetBasePath();
  
-@@ -387,6 +431,12 @@
+@@ -415,6 +459,12 @@ void sysGetExecutablePath(char *outPath, const u32 outLen)
  
  void sysGetHomePath(char *outPath, const u32 outLen)
  {
@@ -212,27 +238,3 @@ diff --git a/port/src/system.c b/port/src/system.c
  	// try asking SDL
  	char *sdlPath = SDL_GetPrefPath("", "perfectdark");
  
-diff --git a/port/include/system.h b/port/include/system.h
---- a/port/include/system.h
-+++ b/port/include/system.h
-@@ -6,6 +6,7 @@
- #endif
- 
- #include <PR/ultratypes.h>
-+#include "platform.h"
- 
- enum LogLevel {
-   LOG_NOTE,
-@@ -40,6 +41,12 @@
- void sysGetExecutablePath(char *outPath, const u32 outLen);
- void sysGetHomePath(char *outPath, const u32 outLen);
- 
-+#ifdef PLATFORM_IOS
-+// Set by the iOS shell in the environment before pdEngineMain(); see system.c.
-+const char *sysIosDocumentsPath(void);
-+const char *sysIosCachesPath(void);
-+#endif
-+
- void *sysMemAlloc(const u32 size);
- void *sysMemZeroAlloc(const u32 size);
- void *sysMemRealloc(void *ptr, const u32 newSize);

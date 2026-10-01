@@ -36,7 +36,7 @@ static NSString *const kRomFileName = @"pd.ntsc-final.z64";
 
 @interface PDOnboardingViewController : UIViewController <UIDocumentPickerDelegate>
 @property (nonatomic, copy) void (^onAccepted)(void);
-/** Re-read Documents/xbla and say what is in it. Main thread. */
+/** Re-read Documents/added-content (and the legacy xbla/) and say what is in it. Main thread. */
 - (void)refreshXbla;
 @end
 

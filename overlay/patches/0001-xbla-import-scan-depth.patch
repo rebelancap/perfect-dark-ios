@@ -35,9 +35,11 @@ NOT YET APPLIED TO A BUILD - scripts/apply-overlay.sh does not exist yet
 (Phase 1). The 0.3 oracles are stock upstream; the XBLA verification above
 was done by flattening cache/xbla/ by hand.
 
+diff --git a/port/src/xblaimport.c b/port/src/xblaimport.c
+index d523f1e61..8d1538b76 100644
 --- a/port/src/xblaimport.c
 +++ b/port/src/xblaimport.c
-@@ -48,7 +48,13 @@
+@@ -53,7 +53,13 @@
  // How far into that folder to look. An archive in the wild wraps the package
  // in a folder of its own ("Perfect Dark/<content id>"), and a player who
  // unpacked one by hand has that folder sitting in xbla/.

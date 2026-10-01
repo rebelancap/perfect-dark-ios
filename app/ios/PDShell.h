@@ -167,6 +167,10 @@ void xblaImportRedetect(void);
 // (fs.c:115), so this is callable before fsInit() has run - which is what lets
 // the shell do the one-time unpack BEFORE the engine starts (D-020).
 int archiveExtract(const char *path, const char *destDir);
+// Same file, same rule: the archive's directory is read with plain fopen() on
+// the path it is given and nothing else, so PDXbla can ask it pre-engine which
+// archive in added-content/ is NOT this game's release (D-070).
+int archiveFindEntry(const char *path, const char *needle);
 
 void texpackRefreshPacks(void);
 int texpackGetNumPacks(void);

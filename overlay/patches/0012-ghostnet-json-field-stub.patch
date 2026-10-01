@@ -14,13 +14,13 @@ in the first place, and matches the other stubs in that block. Worth sending
 upstream — it is a real bug in a configuration upstream supports.
 
 diff --git a/port/src/ghostnet.c b/port/src/ghostnet.c
+index 1666c3210..55cbe5ccf 100644
 --- a/port/src/ghostnet.c
 +++ b/port/src/ghostnet.c
-@@ -1872,7 +1872,25 @@
- // There is no job to be part way through, and no lock to take: the state this
+@@ -1878,6 +1878,24 @@ const char *ghostnetGetMessage(void)
  // would clear is only ever the idle one.
  void ghostnetClearState(void) { }
-+
+ 
 +/**
 + * The JSON scanner, which lives above the #else and so is not compiled here.
 + *
@@ -35,7 +35,7 @@ diff --git a/port/src/ghostnet.c b/port/src/ghostnet.c
 +	if (out && outsize) {
 +		out[0] = '\0';
 +	}
- 
++
 +	return false;
 +}
 +

@@ -22,9 +22,11 @@ untouched; a replay run bypasses the pacer entirely on the shell side.
 
 Every other platform keeps upstream's limiter exactly as it was.
 
---- a/port/fast3d/gfx_sdl2.cpp	2026-09-12 22:00:03
-+++ b/port/fast3d/gfx_sdl2.cpp	2026-09-12 21:59:50
-@@ -21,6 +21,11 @@
+diff --git a/port/fast3d/gfx_sdl2.cpp b/port/fast3d/gfx_sdl2.cpp
+index 6551e9b7b..4ab35e44b 100644
+--- a/port/fast3d/gfx_sdl2.cpp
++++ b/port/fast3d/gfx_sdl2.cpp
+@@ -23,6 +23,11 @@ extern "C" int pdAngleSetSwapInterval(int interval);
  extern "C" int pdAngleGetSwapInterval(void);
  #endif
  
@@ -36,7 +38,7 @@ Every other platform keeps upstream's limiter exactly as it was.
  static SDL_Window* wnd;
  static SDL_GLContext ctx;
  static SDL_Renderer* renderer;
-@@ -198,7 +203,13 @@
+@@ -243,7 +248,13 @@ static void gfx_sdl_init(const struct GfxWindowInitSettings *set) {
      }
      sysLogPrintf(LOG_NOTE, "SDL: created GL3.0es context through ANGLE (%s)", pdAngleGetVendorString());
      pdAngleGetDrawableSize(&window_width, &window_height);
@@ -50,7 +52,7 @@ Every other platform keeps upstream's limiter exactly as it was.
      SDL_ShowWindow(wnd);
      qpc_freq = SDL_GetPerformanceFrequency();
      return;
-@@ -399,6 +410,19 @@
+@@ -453,6 +464,19 @@ static inline void sync_framerate_with_timer(void) {
  }
  
  static void gfx_sdl_swap_buffers_begin(void) {
@@ -70,10 +72,10 @@ Every other platform keeps upstream's limiter exactly as it was.
      if (target_fps) {
          sync_framerate_with_timer();
      }
-@@ -407,6 +431,7 @@
- #else
-     SDL_GL_SwapWindow(wnd);
+@@ -467,6 +491,7 @@ static void gfx_sdl_swap_buffers_begin(void) {
+         SDL_GL_SwapWindow(wnd);
  #endif
+     }
 +#endif
  }
  

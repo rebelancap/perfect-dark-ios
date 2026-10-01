@@ -15,9 +15,28 @@ makes a typo in a bridge command visible.
 Nothing else in the tree calls them; with the iOS shell absent this is dead
 code of about sixty lines.
 
---- a/port/src/config.c	2026-09-12 19:26:37
-+++ b/port/src/config.c	2026-09-12 21:53:56
-@@ -193,6 +193,65 @@
+diff --git a/port/include/config.h b/port/include/config.h
+index e979c0265..4a3a25c2c 100644
+--- a/port/include/config.h
++++ b/port/include/config.h
+@@ -13,6 +13,12 @@ s32 configLoad(const char *fname);
+ // saves config to file (path extensions such as ! apply)
+ s32 configSave(const char *fname);
+ 
++// One setting by its full "Section.Key" name, in the string form pd.ini uses.
++// configSetValue() parses and clamps exactly as a line of the file does.
++// Both return 0 if the key is not registered.
++s32 configSetValue(const char *key, const char *val);
++s32 configGetValue(const char *key, char *dst, u32 dstsize);
++
+ // One section's live settings as "key=value" lines. See the definition.
+ u32 configDumpSection(const char *section, char *dst, u32 dstsize);
+ 
+diff --git a/port/src/config.c b/port/src/config.c
+index 06678ef36..8aae7d455 100644
+--- a/port/src/config.c
++++ b/port/src/config.c
+@@ -214,6 +214,65 @@ static void configSetFromString(const char *key, const char *val)
  	}
  }
  
@@ -83,18 +102,3 @@ code of about sixty lines.
  static void configSaveEntry(struct configentry *cfg, FILE *f)
  {
  	switch (cfg->type) {
---- a/port/include/config.h	2026-09-12 19:26:37
-+++ b/port/include/config.h	2026-09-12 21:53:56
-@@ -13,6 +13,12 @@
- // saves config to file (path extensions such as ! apply)
- s32 configSave(const char *fname);
- 
-+// One setting by its full "Section.Key" name, in the string form pd.ini uses.
-+// configSetValue() parses and clamps exactly as a line of the file does.
-+// Both return 0 if the key is not registered.
-+s32 configSetValue(const char *key, const char *val);
-+s32 configGetValue(const char *key, char *dst, u32 dstsize);
-+
- // One section's live settings as "key=value" lines. See the definition.
- u32 configDumpSection(const char *section, char *dst, u32 dstsize);
- 

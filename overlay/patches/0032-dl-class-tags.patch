@@ -51,11 +51,51 @@ load is WORLD and a MUL into the projection keeps the class of the load:
 The emission is under #ifndef PLATFORM_N64 so a matching N64 build is
 byte-identical.
 
+diff --git a/src/game/menu.c b/src/game/menu.c
+index 14caa7eab..b70cbac13 100644
+--- a/src/game/menu.c
++++ b/src/game/menu.c
+@@ -6069,6 +6069,23 @@ Gfx *menuRender(Gfx *gdl)
+ 
+ 	gdl = func0f0d479c(gdl);
+ 
++#ifndef PLATFORM_N64
++	// FLAT SPAN (D-055, Q-026 answered "flatten"): everything menuRender draws
++	// is identical in both eyes and sits exactly ON the panel.
++	//
++	// PD's menus are NOT the matrix-free NDC rectangles the 3D plan assumed.
++	// func0f0d479c() above installs a real frustum (guFrustumF, znear 10,
++	// savebuffer.c:70) with a depth-FLATTENED viewport, most of the chrome is
++	// projected geometry through it (ten gSPVertex sites in menugfx.c alone),
++	// menuRenderModel() installs a perspective of its own for the rotating
++	// model, the hudpiece uses the world's, and the health bar is drawn in the
++	// world projection inside this very span. Five projections, one dialog — so
++	// this is a SPAN and not a projection class, and it is the span that reaches
++	// all five. Austin, in the headset on 0.0.0.9: "pause menu has depth
++	// intersecting the world".
++	gDPPdDlTag(gdl++, PD_DLSPAN_FLAT_BEGIN);
++#endif
++
+ 	gSPDisplayList(gdl++, var800613a0);
+ 
+ 	// Render the background
+@@ -6431,6 +6448,9 @@ Gfx *menuRender(Gfx *gdl)
+ 
+ #ifndef PLATFORM_N64
+ 	gSPClearExtraGeometryModeEXT(gdl++, G_ASPECT_MODE_EXT);
++	// ...and the flat span closes (D-055), before the world projection comes
++	// back at func0f0d49c8() so that nothing after it is flattened.
++	gDPPdDlTag(gdl++, PD_DLSPAN_FLAT_END);
+ #endif
+ 
+ 	gdl = func0f0d49c8(gdl);
+diff --git a/src/include/gbiex.h b/src/include/gbiex.h
+index d82681671..3e03df788 100644
 --- a/src/include/gbiex.h
 +++ b/src/include/gbiex.h
-@@ -202,6 +202,53 @@
- #define G_SETRECTDEPTH_EXT           0x48
- #define G_SETDEPTHBIAS_EXT           0x49
+@@ -211,6 +211,53 @@
+ #define G_OCCLUSIONTEST_EXT          0x4c
+ #define G_SETTILEOFFSET_EXT          0x4d
  
 +/* ------------------------------------------------------------------------ */
 +/* DISPLAY-LIST CLASS TAGS (visionOS 3D stereo mode, D-055).                */
@@ -107,9 +147,11 @@ byte-identical.
  /* G_EXTRAGEOMETRYMODE flags */
  
  #define G_INVERT_CULLING_EXT     0x00000001
+diff --git a/src/lib/vi.c b/src/lib/vi.c
+index 78e21170d..2226dcc17 100644
 --- a/src/lib/vi.c
 +++ b/src/lib/vi.c
-@@ -549,6 +549,14 @@
+@@ -549,6 +549,14 @@ Gfx *vi0000ab78(Gfx *gdl)
  	sp48 = gfxAllocateMatrix();
  	guMtxF2L(sp50.m, sp48);
  
@@ -124,7 +166,7 @@ byte-identical.
  	gSPMatrix(gdl++, OS_K0_TO_PHYSICAL(sp4c), G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION);
  	gSPMatrix(gdl++, OS_K0_TO_PHYSICAL(sp48), G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_MODELVIEW);
  	gSPPerspNormalize(gdl++, sp46);
-@@ -565,6 +573,14 @@
+@@ -565,6 +573,14 @@ Gfx *vi0000aca4(Gfx *gdl, f32 znear, f32 zfar)
  	guPerspectiveF(tmp.m, &scale, g_ViBackData->fovy, g_ViBackData->aspect, znear, zfar, 1);
  	guMtxF2L(tmp.m, mtx);
  
@@ -139,7 +181,7 @@ byte-identical.
  	gSPMatrix(gdl++, OS_K0_TO_PHYSICAL(mtx), G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION);
  	gSPPerspNormalize(gdl++, scale);
  
-@@ -586,6 +602,8 @@
+@@ -586,6 +602,8 @@ Gfx *viSetPerspectiveWithFov(Gfx *gdl, f32 fovy, f32 znear, f32 zfar)
  	guPerspectiveF(tmp.m, &scale, fovy, g_ViBackData->aspect, znear, zfar, 1);
  	guMtxF2L(tmp.m, mtx);
  
@@ -148,39 +190,3 @@ byte-identical.
  	gSPMatrix(gdl++, OS_K0_TO_PHYSICAL(mtx), G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION);
  	gSPPerspNormalize(gdl++, scale);
  
---- a/src/game/menu.c
-+++ b/src/game/menu.c
-@@ -5625,6 +5625,23 @@
- #endif
- 
- 	gdl = func0f0d479c(gdl);
-+
-+#ifndef PLATFORM_N64
-+	// FLAT SPAN (D-055, Q-026 answered "flatten"): everything menuRender draws
-+	// is identical in both eyes and sits exactly ON the panel.
-+	//
-+	// PD's menus are NOT the matrix-free NDC rectangles the 3D plan assumed.
-+	// func0f0d479c() above installs a real frustum (guFrustumF, znear 10,
-+	// savebuffer.c:70) with a depth-FLATTENED viewport, most of the chrome is
-+	// projected geometry through it (ten gSPVertex sites in menugfx.c alone),
-+	// menuRenderModel() installs a perspective of its own for the rotating
-+	// model, the hudpiece uses the world's, and the health bar is drawn in the
-+	// world projection inside this very span. Five projections, one dialog — so
-+	// this is a SPAN and not a projection class, and it is the span that reaches
-+	// all five. Austin, in the headset on 0.0.0.9: "pause menu has depth
-+	// intersecting the world".
-+	gDPPdDlTag(gdl++, PD_DLSPAN_FLAT_BEGIN);
-+#endif
- 
- 	gSPDisplayList(gdl++, var800613a0);
- 
-@@ -5961,6 +5978,9 @@
- 
- #ifndef PLATFORM_N64
- 	gSPClearExtraGeometryModeEXT(gdl++, G_ASPECT_MODE_EXT);
-+	// ...and the flat span closes (D-055), before the world projection comes
-+	// back at func0f0d49c8() so that nothing after it is flattened.
-+	gDPPdDlTag(gdl++, PD_DLSPAN_FLAT_END);
- #endif
- 
- 	gdl = func0f0d49c8(gdl);

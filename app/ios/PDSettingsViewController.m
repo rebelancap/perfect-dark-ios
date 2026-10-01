@@ -701,7 +701,7 @@ static CFTimeInterval sPresentStarted;
 			// ONE switch, the F6 equivalent: it drives all five parts together
 			// (xblaswitch.c), which is what F6 does and what a player means.
 			pdSwitchRow(@"Xbox 360 textures and models", PDDefXblaWholeRelease),
-			// What is in Documents/xbla, named. The engine's own
+			// What is in Documents/added-content (or the legacy xbla/), named. The engine's own
 			// xblaImportIsAvailable() answers yes/no and nothing else, and a
 			// player whose file was not recognised needs to be told which file
 			// was looked at, not just that something went wrong (D-018).
@@ -711,7 +711,7 @@ static CFTimeInterval sPresentStarted;
 				// runs on every dequeue of this cell (D-032).
 				PDXblaFind *f = PDXbla.cachedScan;
 				if (!f.found) {
-					return @"none in Documents/xbla";
+					return @"none in Documents/added-content";
 				}
 				if (PDXbla.unpacking) {
 					return [NSString stringWithFormat:@"%@ — unpacking %d%%",

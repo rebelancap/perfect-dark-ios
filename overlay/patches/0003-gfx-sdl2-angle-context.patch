@@ -16,10 +16,10 @@ window on its own), the present (eglSwapBuffers), and the swap interval.
 With PD_GL_ANGLE off every line here is preprocessed away.
 
 diff --git a/port/fast3d/gfx_sdl2.cpp b/port/fast3d/gfx_sdl2.cpp
-index f967cb8c8..d72921b28 100644
+index e572830d4..6551e9b7b 100644
 --- a/port/fast3d/gfx_sdl2.cpp
 +++ b/port/fast3d/gfx_sdl2.cpp
-@@ -9,6 +9,18 @@
+@@ -11,6 +11,18 @@
  #include "gfx_window_manager_api.h"
  #include "gfx_screen_config.h"
  
@@ -38,21 +38,21 @@ index f967cb8c8..d72921b28 100644
  static SDL_Window* wnd;
  static SDL_GLContext ctx;
  static SDL_Renderer* renderer;
-@@ -124,7 +136,13 @@ static void gfx_sdl_init(const struct GfxWindowInitSettings *set) {
+@@ -186,7 +198,13 @@ static void gfx_sdl_init(const struct GfxWindowInitSettings *set) {
+         return;
      }
  
-     // we will unhide the window once the GL context is successfully created
 +#ifdef PD_GL_ANGLE
 +    // ANGLE draws into the window's CAMetalLayer; SDL must not make a GL
 +    // context of its own, so SDL_WINDOW_OPENGL must NOT be set here.
-+    Uint32 flags = SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_METAL;
++    flags |= SDL_WINDOW_METAL;
 +#else
-     Uint32 flags = SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL;
+     flags |= SDL_WINDOW_OPENGL;
 +#endif
  
-     // if fullscreen was requested, start the window in fullscreen right away
-     if (set->fullscreen) {
-@@ -168,6 +186,23 @@ static void gfx_sdl_init(const struct GfxWindowInitSettings *set) {
+     // ideally we need 3.0 compat
+     // if that doesn't work, try 3.2 core in case we're on mac, 2.1 compat as a last resort
+@@ -213,6 +231,23 @@ static void gfx_sdl_init(const struct GfxWindowInitSettings *set) {
          }
      }
  
@@ -76,7 +76,7 @@ index f967cb8c8..d72921b28 100644
      ctx = NULL;
      u32 vmin = 0, vmaj = 0, vprof = SDL_GL_CONTEXT_PROFILE_COMPATIBILITY;
      const char *vprofstr = "";
-@@ -208,6 +243,7 @@ static void gfx_sdl_init(const struct GfxWindowInitSettings *set) {
+@@ -253,6 +288,7 @@ static void gfx_sdl_init(const struct GfxWindowInitSettings *set) {
      SDL_ShowWindow(wnd);
  
      qpc_freq = SDL_GetPerformanceFrequency();
@@ -84,19 +84,19 @@ index f967cb8c8..d72921b28 100644
  }
  
  static void gfx_sdl_close(void) {
-@@ -284,7 +320,11 @@ static void gfx_sdl_set_dimensions(uint32_t width, uint32_t height, int32_t posX
+@@ -338,7 +374,11 @@ static void gfx_sdl_set_dimensions(uint32_t width, uint32_t height, int32_t posX
  }
  
  static void gfx_sdl_get_dimensions(uint32_t* width, uint32_t* height, int32_t* posX, int32_t* posY) {
 +#ifdef PD_GL_ANGLE
 +    pdAngleGetDrawableSize(static_cast<int*>((void*)width), static_cast<int*>((void*)height));
 +#else
-     SDL_GL_GetDrawableSize(wnd, static_cast<int*>((void*)width), static_cast<int*>((void*)height));
+     get_drawable_size(static_cast<int*>((void*)width), static_cast<int*>((void*)height));
 +#endif
      SDL_GetWindowPosition(wnd, static_cast<int*>(posX), static_cast<int*>(posY));
  }
  
-@@ -300,7 +340,12 @@ static void gfx_sdl_handle_events(void) {
+@@ -354,7 +394,12 @@ static void gfx_sdl_handle_events(void) {
                  break;
              case SDL_WINDOWEVENT:
                  if (event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
@@ -104,27 +104,27 @@ index f967cb8c8..d72921b28 100644
 +                    pdAngleResized(wnd);
 +                    pdAngleGetDrawableSize(&window_width, &window_height);
 +#else
-                     SDL_GL_GetDrawableSize(wnd, &window_width, &window_height);
+                     get_drawable_size(&window_width, &window_height);
 +#endif
                      if (!fullscreen_state) {
                          maximized_state = SDL_GetWindowFlags(wnd) & SDL_WINDOW_MAXIMIZED ? true : false;
                      }
-@@ -357,7 +402,11 @@ static void gfx_sdl_swap_buffers_begin(void) {
-     if (target_fps) {
-         sync_framerate_with_timer();
-     }
+@@ -416,7 +461,11 @@ static void gfx_sdl_swap_buffers_begin(void) {
+             vk_present_hook();
+         }
+     } else {
 +#ifdef PD_GL_ANGLE
-+    pdAngleSwapBuffers();
++        pdAngleSwapBuffers();
 +#else
-     SDL_GL_SwapWindow(wnd);
+         SDL_GL_SwapWindow(wnd);
 +#endif
+     }
  }
  
- static void gfx_sdl_swap_buffers_end(void) {
-@@ -389,11 +438,19 @@ static void gfx_sdl_set_window_title(const char *title) {
- }
- 
- static int gfx_sdl_get_swap_interval(void) {
+@@ -452,7 +501,11 @@ static int gfx_sdl_get_swap_interval(void) {
+     if (use_vulkan) {
+         return vk_get_interval_hook ? vk_get_interval_hook() : 1;
+     }
 +#ifdef PD_GL_ANGLE
 +    return pdAngleGetSwapInterval();
 +#else
@@ -133,6 +133,10 @@ index f967cb8c8..d72921b28 100644
  }
  
  static bool gfx_sdl_set_swap_interval(int interval) {
+@@ -461,7 +514,11 @@ static bool gfx_sdl_set_swap_interval(int interval) {
+         vsync_enabled = ok && (interval != 0);
+         return ok;
+     }
 +#ifdef PD_GL_ANGLE
 +    const bool success = pdAngleSetSwapInterval(interval) != 0;
 +#else

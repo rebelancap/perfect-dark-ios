@@ -11,14 +11,14 @@ compiles to nothing - the oracle keeps building and replaying byte for byte.
 With it, the file is added to SRC_PORT at -O2 and its directory goes on the
 include path so the patched engine files can #include "pd_frame_prof.h".
 
---- a/CMakeLists.txt	2026-09-15 11:15:34
-+++ b/CMakeLists.txt	2026-09-15 11:15:53
-@@ -557,6 +557,28 @@
-   # The ANGLE/EGL context glue is additive and lives outside the vendored tree.
-   list(APPEND SRC_PORT_CXX "${PD_ANGLE_GLUE}")
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 0c5b821e2..3bc021b45 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -678,6 +678,28 @@ if(PD_GL_ANGLE)
    set_source_files_properties("${PD_ANGLE_GLUE}" PROPERTIES COMPILE_OPTIONS "-O2")
-+endif()
-+
+ endif()
+ 
 +# PD_IOS_PROF_SRC: the frame-breakdown instrument (app/gfx/pd_frame_prof.c).
 +#
 +# Instruments cannot be attached from outside on a sideloaded iOS build -
@@ -39,6 +39,8 @@ include path so the patched engine files can #include "pd_frame_prof.h".
 +  add_definitions(-DPD_IOS_PROFILER)
 +  list(APPEND SRC_PORT "${PD_IOS_PROF_SRC}")
 +  set_source_files_properties("${PD_IOS_PROF_SRC}" PROPERTIES COMPILE_OPTIONS "-O2")
- endif()
- 
++endif()
++
  set(SRC
+   ${SRC_GAME}
+   ${SRC_PORT}

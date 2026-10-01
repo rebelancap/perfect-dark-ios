@@ -30,7 +30,15 @@
 // The engine's own names, from port/src/xblaimport.c. Kept as literals rather
 // than included: the shell is Foundation and the port's headers drag in
 // PR/ultratypes.h and the whole decomp include path (PDShell.h's rule).
-static NSString *const kXblaDir    = @"xbla";
+// Upstream c18645860 (fs.h FS_ADDED_CONTENT_DIR, xblaimport.c xblaDetect):
+// the player's copy goes in added-content/ beside the GoldenEye ROM and the
+// GoldenEye XBLA release, and the engine MOVES whatever an older install had
+// in xbla/ into it the first time it looks (fs.c fsAddedContentDir). xbla/ is
+// still searched after it, so the shell searches both in the same order - the
+// pre-engine unpack (D-020) runs before that first move, on the folder the
+// archive is still in.
+static NSString *const kXblaDir    = @"added-content";
+static NSString *const kLegacyDir  = @"xbla";
 static NSString *const kCacheSub   = @"xbla";      // cache/xbla, patch 0009 -> Caches/xbla
 static NSString *const kDoneFile   = @".extracted";
 // overlay/patches/0001-xbla-import-scan-depth.patch raises XBLAIMPORT_SCAN_DEPTH
@@ -39,6 +47,13 @@ static NSString *const kDoneFile   = @".extracted";
 // the engine does would mean the onboarding screen saying "nothing found"
 // about a copy the engine goes on to use.
 static const int kScanDepth = 4;
+// xblaScanForPackage()'s two "not this release" tests (D-070): added-content/
+// is shared, and the engine passes over the GoldenEye XBLA archive (an entry
+// under files/new/char/) and the Community Edition updater zip (gebean.h
+// GEBEANCE_DIFF_ENTRY) before it takes an archive for Perfect Dark's. A .rar is
+// never looked into, by the engine or here.
+static NSString *const kGoldenEyeEntry = @"files/new/char/";
+static NSString *const kCeUpdateEntry  = @"CEUpdate/files.diff";
 
 static BOOL sUnpacking;
 static NSTimeInterval sUnpackStarted;
@@ -75,8 +90,8 @@ static NSString *sUnpackNote;            // the last thing the engine's importer
 		// has no way to navigate to it. The ROM line above names the same folder
 		// the same way.
 		return @"Optional: the Xbox 360 (XBLA) release. Put Perfect Dark.rar, a .7z, the bare "
-		        "Xbox 360 package, or a folder holding one, into the xbla folder here:\n"
-		        "    Files → On My iPhone → Perfect Dark → xbla\n"
+		        "Xbox 360 package, or a folder holding one, into the added-content folder here:\n"
+		        "    Files → On My iPhone → Perfect Dark → added-content\n"
 		        "Then the game draws 4J's high-resolution textures, meshes, rooms, font and "
 		        "explosions in place of the N64 art.";
 	}
@@ -144,6 +159,14 @@ static NSString *sUnpackNote;            // the last thing the engine's importer
 	return PDXblaNone;
 }
 
+/** An archive the engine's scan passes over because it is another release's. */
++ (BOOL)isOtherRelease:(NSString *)path
+{
+	const char *p = path.fileSystemRepresentation;
+	return archiveFindEntry(p, kGoldenEyeEntry.UTF8String)
+	    || archiveFindEntry(p, kCeUpdateEntry.UTF8String);
+}
+
 /**
  * One pass of the engine's xblaScanDir(). `archives` NO is the package pass and
  * YES the archive pass, and the engine runs them in that order for the reason
@@ -172,7 +195,7 @@ static NSString *sUnpackNote;            // the last thing the engine's importer
 		if ([self looksLikePackage:path]) {
 			return path;
 		}
-		if (archives && [self archiveKind:path] != PDXblaNone) {
+		if (archives && [self archiveKind:path] != PDXblaNone && ![self isOtherRelease:path]) {
 			return path;
 		}
 	}
@@ -191,10 +214,20 @@ static NSString *sUnpackNote;            // the last thing the engine's importer
 + (PDXblaFind *)scan
 {
 	PDXblaFind *f = [PDXblaFind new];
-	NSString *root = self.dropDir;
+	NSString *root = nil;
+	NSString *hit = nil;
+	NSString *legacy = [PDShell.shared.documentsPath stringByAppendingPathComponent:kLegacyDir];
 
-	NSString *hit = [self scanDir:root archives:NO depth:kScanDepth]
-	             ?: [self scanDir:root archives:YES depth:kScanDepth];
+	// The engine's order (xblaDetect): added-content/ first, xbla/ after it,
+	// a package before an archive within each. xbla/ is looked in, never made.
+	for (NSString *dir in @[ self.dropDir, legacy ]) {
+		hit = [self scanDir:dir archives:NO depth:kScanDepth]
+		   ?: [self scanDir:dir archives:YES depth:kScanDepth];
+		if (hit) {
+			root = dir;
+			break;
+		}
+	}
 	if (!hit) {
 		return f;
 	}
@@ -210,6 +243,12 @@ static PDXblaFind *sCachedScan;
 
 + (PDXblaFind *)cachedScan
 {
+	// The engine's first look moves xbla/* into added-content/ (fs.c
+	// fsAddedContentDir) after the shell's pre-engine scan, so a cached find can
+	// name a path that is no longer there. Gone = look again.
+	if (sCachedScan.found && ![NSFileManager.defaultManager fileExistsAtPath:sCachedScan.path]) {
+		sCachedScan = nil;
+	}
 	if (!sCachedScan) {
 		sCachedScan = self.scan;
 		NSLog(@"perfectdark: [xbla] scan cached: %@", sCachedScan.headline);
@@ -464,7 +503,7 @@ static PDXblaFind *sCachedScan;
 	NSLog(@"perfectdark: [xbla] presenting the document picker");
 }
 
-/** Copy a picked file into Documents/xbla. Main thread; returns the new path. */
+/** Copy a picked file into Documents/added-content. Main thread; returns the new path. */
 + (nullable NSString *)adoptPickedURL:(NSURL *)url error:(NSError **)err
 {
 	NSString *dst = [self.dropDir stringByAppendingPathComponent:url.lastPathComponent];

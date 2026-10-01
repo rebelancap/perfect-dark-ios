@@ -24,7 +24,8 @@
 #   * a gamepad button that does not reach the engine's pad mask;
 #   * the M-001 chicago-solo seeded replay drawing a different gfx stream from
 #     the macOS clang oracle at 1280x720, or a frame that differs from the
-#     oracle's by more than 16/255 on any channel or on more than 6% of pixels;
+#     oracle's by more than 1/255 on more than 6% of pixels, or by more than
+#     16/255 on more than 0.02% of them or in any group over 16 pixels (D-068);
 #   * a crash, an "Unknown GBI" command, or an EGL error anywhere in the log.
 #
 # THE DEVICE: there is exactly ONE Apple Vision Pro simulator on this machine
@@ -197,9 +198,9 @@ mkdir -p "$DOCS"
 cp -f "$ROM" "$DOCS/pd.ntsc-final.z64"
 
 if [ "$DO_XBLA" = "1" ]; then
-	mkdir -p "$DOCS/xbla"
-	cp -f "$XBLA_ARCHIVE" "$DOCS/xbla/"
-	echo "  pushed $(basename "$XBLA_ARCHIVE") into Documents/xbla"
+	mkdir -p "$DOCS/added-content"
+	cp -f "$XBLA_ARCHIVE" "$DOCS/added-content/"
+	echo "  pushed $(basename "$XBLA_ARCHIVE") into Documents/added-content"
 fi
 
 XBLA_ROWS=0
@@ -606,9 +607,51 @@ print(f"  pixels differing by >1/255: {differing}/{total} ({pct:.2f}%), max delt
 
 diff.point(lambda v: min(255, v * 20)).save(sys.argv[3])
 
-ok = maxd <= int(sys.argv[4]) and pct <= float(sys.argv[5])
+# D-068: the outlier budget. Since c18645860 upstream SEALS room seams by
+# growing T-junction faces exactly half a pixel (gfx_pc.cpp gfx_seal_seams),
+# which puts those edges on pixel centres - a coverage tie that ANGLE-Metal and
+# desktop GL break differently, so isolated edge pixels flip between the wall
+# and whatever is behind it (measured: 24-50 pixels, <0.008% of the frame,
+# no group larger than 4, max 54-100/255; 16 of iOS's 25 sit exactly on a
+# pixel the sealing changes, and there the sim matches the UNSEALED oracle).
+# A max-delta test cannot tell that from a broken frame, so it no longer
+# decides alone: pixels over MAX_DELTA are allowed up to OUTLIER_PCT of the
+# frame, and only as specks - any 8-connected group larger than
+# OUTLIER_GROUP pixels fails, as does anything over the budget. A missing
+# texture, a wrong glyph or a shifted HUD is thousands of pixels in groups of
+# hundreds; the gfx stream above stays exact.
+OUTLIER_PCT = 0.02
+OUTLIER_GROUP = 16
+w, h = a.size
+over = set()
+for i, p in enumerate(px):
+    if max(p) > int(sys.argv[4]):
+        over.add((i % w, i // w))
+seen = set()
+largest = 0
+for q in over:
+    if q in seen:
+        continue
+    stack = [q]
+    seen.add(q)
+    n = 0
+    while stack:
+        x, y = stack.pop()
+        n += 1
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                r = (x + dx, y + dy)
+                if r in over and r not in seen:
+                    seen.add(r)
+                    stack.append(r)
+    largest = max(largest, n)
+over_pct = 100.0 * len(over) / (w * h)
+print(f"  pixels over {sys.argv[4]}/255: {len(over)} ({over_pct:.4f}%), largest group {largest} px")
+
+ok = pct <= float(sys.argv[5]) and over_pct <= OUTLIER_PCT and largest <= OUTLIER_GROUP
 if not ok:
-    print(f"  OVER THRESHOLD (max {sys.argv[4]}, {sys.argv[5]}%)")
+    print(f"  OVER THRESHOLD (>1/255 on at most {sys.argv[5]}%; over {sys.argv[4]}/255 on at most "
+          f"{OUTLIER_PCT}% in groups of at most {OUTLIER_GROUP} px - D-068)")
 sys.exit(0 if ok else 1)
 PY
 

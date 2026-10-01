@@ -26,9 +26,49 @@ changes. Production is 22,080 samples/s against 22,851 consumed (M-036), i.e.
 BELOW consumption, so the queue cannot run away with the governor raised, and
 `queueLimit` (16384 on iOS) is still the hard ceiling.
 
+diff --git a/port/src/audio.c b/port/src/audio.c
+index 1872f1415..1bce3f615 100644
+--- a/port/src/audio.c
++++ b/port/src/audio.c
+@@ -6,6 +6,7 @@
+ #include "audio.h"
+ #include "record.h"
+ #include "system.h"
++#include "lib/audiomgr.h"   /* g_AmgrThrottleSamples (overlay 0028) */
+ 
+ static SDL_AudioDeviceID dev;
+ static const s16 *nextBuf;
+@@ -452,5 +453,9 @@ PD_CONSTRUCTOR static void audioConfigInit(void)
+ 	configRegisterInt("Audio.PrimeSamples", &primeSamples, 0, 32 * 1024);
+ 	configRegisterInt("Audio.RateMatch", &rateMatch, 0, 1);
+ 	configRegisterInt("Audio.RateMatchMaxPct", &rateMatchMaxPct, 1, 50);
++	// The ENGINE's own governor (overlay 0028, D-042), exposed so the pair can
++	// be A/B'd live on the phone: set it to 1100 and amgrFrame() goes back to
++	// throttling itself to 184 samples on alternate ticks.
++	configRegisterInt("Audio.EngineThrottleSamples", &g_AmgrThrottleSamples, 0, 1 * 1024 * 1024);
+ #endif
+ }
+diff --git a/src/include/lib/audiomgr.h b/src/include/lib/audiomgr.h
+index ec1d6ba0a..2b99dacc8 100644
+--- a/src/include/lib/audiomgr.h
++++ b/src/include/lib/audiomgr.h
+@@ -18,6 +18,11 @@ void amgrStopThread(void);
+ 
+ #ifndef PLATFORM_N64
+ void amgrFrame(void);
++
++#ifndef PLATFORM_N64
++/** Upstream's 1100, raised on iOS by overlay 0028 - see audiomgr.c. */
++extern s32 g_AmgrThrottleSamples;
++#endif
+ #endif
+ 
+ #endif
+diff --git a/src/lib/audiomgr.c b/src/lib/audiomgr.c
+index 7791798de..b381599fd 100644
 --- a/src/lib/audiomgr.c
 +++ b/src/lib/audiomgr.c
-@@ -321,6 +321,24 @@
+@@ -321,6 +321,24 @@ void amgrHandleDoneMsg(AudioInfo *info)
  }
  
  #ifndef PLATFORM_N64
@@ -53,7 +93,7 @@ BELOW consumption, so the queue cannot run away with the governor raised, and
  void amgrFrame(void)
  {
  	static AudioInfo *previnfo = NULL;
-@@ -340,7 +358,7 @@
+@@ -340,7 +358,7 @@ void amgrFrame(void)
  		osAiSetNextBuffer(previnfo->data, previnfo->frameSamples * 4);
  	}
  
@@ -62,37 +102,3 @@ BELOW consumption, so the queue cannot run away with the governor raised, and
  		// already a lot queued, render 1 naudio frame (184 samples) this frame
  		info->frameSamples = 184;
  		var8005cf94 = 2;
---- a/port/src/audio.c
-+++ b/port/src/audio.c
-@@ -6,6 +6,7 @@
- #include "audio.h"
- #include "record.h"
- #include "system.h"
-+#include "lib/audiomgr.h"   /* g_AmgrThrottleSamples (overlay 0028) */
- 
- static SDL_AudioDeviceID dev;
- static const s16 *nextBuf;
-@@ -452,5 +453,9 @@
- 	configRegisterInt("Audio.PrimeSamples", &primeSamples, 0, 32 * 1024);
- 	configRegisterInt("Audio.RateMatch", &rateMatch, 0, 1);
- 	configRegisterInt("Audio.RateMatchMaxPct", &rateMatchMaxPct, 1, 50);
-+	// The ENGINE's own governor (overlay 0028, D-042), exposed so the pair can
-+	// be A/B'd live on the phone: set it to 1100 and amgrFrame() goes back to
-+	// throttling itself to 184 samples on alternate ticks.
-+	configRegisterInt("Audio.EngineThrottleSamples", &g_AmgrThrottleSamples, 0, 1 * 1024 * 1024);
- #endif
- }
---- a/src/include/lib/audiomgr.h
-+++ b/src/include/lib/audiomgr.h
-@@ -18,6 +18,11 @@
- 
- #ifndef PLATFORM_N64
- void amgrFrame(void);
-+
-+#ifndef PLATFORM_N64
-+/** Upstream's 1100, raised on iOS by overlay 0028 - see audiomgr.c. */
-+extern s32 g_AmgrThrottleSamples;
- #endif
-+#endif
- 
- #endif

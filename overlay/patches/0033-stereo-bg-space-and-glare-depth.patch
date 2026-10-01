@@ -92,102 +92,11 @@ Everywhere but visionOS PD_VISION_STEREO is 0 and every line of this is
 preprocessed away; the engine-side tags are under #ifndef PLATFORM_N64 and cost
 one G_NOOP each, which changes no draw, tri, vert or texture counter.
 
---- a/src/include/gbiex.h
-+++ b/src/include/gbiex.h
-@@ -246,6 +246,34 @@
- /* Span markers, sticky between the two: flatten everything drawn inside. */
- #define PD_DLSPAN_FLAT_BEGIN  8
- #define PD_DLSPAN_FLAT_END    9
-+
-+/*
-+ * Two payloads that carry a NUMBER rather than a class (D-060). The class
-+ * values above are all < 8, so the top two bits are free to say "this tag is a
-+ * number, and here is which one".
-+ *
-+ *   0x8000 | d : the VIEW DEPTH, in PD units, of the next 2D rectangle. PD
-+ *                draws its light glares as screen-space texture rectangles at
-+ *                a position it projected itself (artifact.c), so they have no
-+ *                matrix and therefore no disparity - they sit ON the panel
-+ *                while the fixture they belong to sits at its own depth, which
-+ *                is what Austin reported as "every time i look at a light, it
-+ *                hurts". The tag is consumed by ONE rectangle and hands the
-+ *                renderer the depth it needs to shift that rectangle per eye.
-+ *
-+ *   0x4000 | s : bgGetScaleBg2Gfx() x 1024, STICKY for the rest of the frame.
-+ *                The rooms are drawn in a view space scaled by this (player.c
-+ *                mtx00015f04(scale, &sp8c)), so an eye offset expressed in
-+ *                view units means a different PHYSICAL separation for the room
-+ *                than for the body standing in it. Half on Villa, Crash Site
-+ *                and Air Base, and anything at all while a scope is zoomed.
-+ */
-+#define PD_DLTAG_DEPTH_BIT    0x8000u
-+#define PD_DLTAG_DEPTH(d)     (PD_DLTAG_DEPTH_BIT | ((unsigned int)(d) & 0x7fffu))
-+#define PD_DLTAG_SCALE_BIT    0x4000u
-+#define PD_DLTAG_SCALE_SHIFT  1024.0f
-+#define PD_DLTAG_SCALE(s)     (PD_DLTAG_SCALE_BIT | \
-+		((unsigned int)((s) * PD_DLTAG_SCALE_SHIFT) & 0x3fffu))
- 
- #define gDPPdDlTag(pkt, x) gDPNoOpTag(pkt, PD_DLTAG(x))
- 
---- a/src/game/bg.c
-+++ b/src/game/bg.c
-@@ -2412,6 +2412,18 @@
- Gfx *bgRender(Gfx *gdl)
- {
- 	gdl = lightsSetDefault(gdl);
-+
-+#ifndef PLATFORM_N64
-+	// The frame's BG-to-GFX scale, for the visionOS stereo fold (D-060). The
-+	// rooms are drawn through a view matrix whose linear part has been
-+	// multiplied by this (player.c, mtx00015f04(scale, &sp8c)), so the room's
-+	// view space is `scale` times the one every prop, chr and viewmodel is in.
-+	// An eye offset of e view units is then e/scale PD units for the floor and
-+	// e for the body standing on it: two different interoculars for one scene.
-+	// This is the first thing the whole frame emits, so nothing drawn under the
-+	// BG's own matrices can miss it.
-+	gDPPdDlTag(gdl++, PD_DLTAG_SCALE(bgGetScaleBg2Gfx()));
-+#endif
- 
- 	gSPSegment(gdl++, SPSEGMENT_BG_DL, g_BgPrimaryData);
- 
---- a/src/game/artifact.c
-+++ b/src/game/artifact.c
-@@ -781,6 +781,19 @@
- 						}
- #endif
- 
-+#ifndef PLATFORM_N64
-+						// The glare's own VIEW DEPTH (D-060). A glare is a
-+						// screen-space texture rectangle at a position this
-+						// function projected itself, so it has no matrix and
-+						// the visionOS stereo fold cannot give it a disparity:
-+						// it lands ON the panel while its light fixture is at
-+						// its own depth. Austin, in the headset on 0.0.0.10:
-+						// "every time i look at a light, it hurts". The tag
-+						// hands the renderer the depth, and it shifts the
-+						// rectangle per eye. One tag, one rectangle.
-+						gDPPdDlTag(gdl++, PD_DLTAG_DEPTH(
-+							(s32)(-lightscreenpos.z < 1.0f ? 1.0f : -lightscreenpos.z)));
-+#endif
- 						func0f0b2740(&gdl, spdc, spd4, 64, 64, false, false, false, 1);
- 
- 						if (extra) {
-@@ -795,6 +808,12 @@
- 							spd4[0] = f24 * 0.4f;
- 							spd4[1] = f26 * 0.4f;
- 
-+#ifndef PLATFORM_N64
-+							// ...and the inner, brighter core of the same
-+							// glare, at the same depth (D-060).
-+							gDPPdDlTag(gdl++, PD_DLTAG_DEPTH(
-+								(s32)(-lightscreenpos.z < 1.0f ? 1.0f : -lightscreenpos.z)));
-+#endif
- 							func0f0b2740(&gdl, spdc, spd4, 64, 64, false, false, false, 1);
- 						}
- 
+diff --git a/port/fast3d/gfx_pc.cpp b/port/fast3d/gfx_pc.cpp
+index f1b4fb617..8a094bddc 100644
 --- a/port/fast3d/gfx_pc.cpp
 +++ b/port/fast3d/gfx_pc.cpp
-@@ -81,6 +81,11 @@
+@@ -83,6 +83,11 @@ extern "C" int pdVisionEyeIsCapture(int eye);
  extern "C" void pdVisionEyeBeginPair(void);
  extern "C" void pdVisionStereoNoteClass(int cls);
  extern "C" void pdVisionStereoNoteGunDepth(float depth);
@@ -199,11 +108,10 @@ one G_NOOP each, which changes no draw, tri, vert or texture counter.
  #else
  #define PD_VISION_STEREO 0
  #endif
-@@ -1915,20 +1920,80 @@
- // (vi0000ab78, vi.c), the gun's (vi0000aca4 and viSetPerspectiveWithFov, by
+@@ -2221,19 +2226,79 @@ static void gfx_matrix_mul(float res[4][4], const float a[4][4], const float b[4
  // the znear THEY WERE CALLED WITH rather than one read back out of a matrix),
  // and menuRender's own flat span.
-+// ---------------------------------------------------------------------------
+ // ---------------------------------------------------------------------------
 +// ---------------------------------------------------------------------------
 +// ...AND THE OTHER HALF, WHICH D-055 GOT WRONG (D-060).
 +//
@@ -242,7 +150,7 @@ one G_NOOP each, which changes no draw, tri, vert or texture counter.
 +// so the test never rounds. A plain one is folded as before; a baked one is
 +// folded by the same arithmetic written in the form that survives the bake
 +// (gfx_stereo_projection below).
- // ---------------------------------------------------------------------------
++// ---------------------------------------------------------------------------
  struct PDStereoState {
      int pending_class;  // the class the next projection LOAD will take
      int p_class;        // the class of the projection now in rsp.P_matrix
@@ -253,14 +161,14 @@ one G_NOOP each, which changes no draw, tri, vert or texture counter.
  };
 -static PDStereoState pd_stereo = { PD_DLCLASS_WORLD, PD_DLCLASS_WORLD, 0 };
 +static PDStereoState pd_stereo = { PD_DLCLASS_WORLD, PD_DLCLASS_WORLD, 0, 1.0f, 0.0f, 0.0f };
- 
++
 +// What one eye of the last completed frame saw, for `3d state`. The MUL count
 +// is here because D-055 asserted "PD's lists MULTIPLY into the projection" with
 +// no site to point at, and the counter is the only way to settle it.
 +static uint32_t pd_stereo_mul_p, pd_stereo_load_p, pd_stereo_baked, pd_stereo_depth_rects;
 +extern "C" void pdVisionStereoNoteFrameFacts(float bgScale, uint32_t mulP, uint32_t loadP,
 +                                             uint32_t baked, uint32_t depthRects);
-+
+ 
  /** The tagged-G_NOOP reader. Untagged noops (gDPSetBlendMask) have w1 == 0. */
  static void gfx_stereo_dl_tag(uint32_t w1) {
      if (!PD_DLTAG_IS_OURS(w1)) {
@@ -282,7 +190,7 @@ one G_NOOP each, which changes no draw, tri, vert or texture counter.
          case PD_DLSPAN_FLAT_BEGIN: pd_stereo.flat_span = 1; break;
          case PD_DLSPAN_FLAT_END:   pd_stereo.flat_span = 0; break;
          case PD_DLCLASS_SKY:       pd_stereo.pending_class = PD_DLCLASS_SKY; break;
-@@ -1942,9 +2007,27 @@
+@@ -2247,6 +2312,24 @@ static void gfx_stereo_reset_classes(void) {
      pd_stereo.pending_class = PD_DLCLASS_WORLD;
      pd_stereo.p_class = PD_DLCLASS_WORLD;
      pd_stereo.flat_span = 0;
@@ -293,9 +201,9 @@ one G_NOOP each, which changes no draw, tri, vert or texture counter.
 +    pd_stereo_load_p = 0;
 +    pd_stereo_baked = 0;
 +    pd_stereo_depth_rects = 0;
- }
- 
- /**
++}
++
++/**
 + * Is this the plain guPerspectiveF output, or a product with the view (or the
 + * camera's rotation) baked into it? Exact: every one of those zeros is written
 + * as a zero by guMtxF2L and read back as a zero by gfx_sp_matrix.
@@ -304,13 +212,10 @@ one G_NOOP each, which changes no draw, tri, vert or texture counter.
 +    return P[0][1] == 0.0f && P[0][2] == 0.0f && P[0][3] == 0.0f &&
 +           P[1][0] == 0.0f && P[1][2] == 0.0f && P[1][3] == 0.0f &&
 +           P[2][3] == -1.0f && P[3][0] == 0.0f && P[3][1] == 0.0f && P[3][3] == 0.0f;
-+}
-+
-+/**
-  * The per-eye projection, from the mono one (plan §2.4, D-049's arithmetic).
-  *
-  * PD's matrices are ROW-vector (v * M): guPerspectiveF writes P[2][3] = -1 and
-@@ -2012,13 +2095,14 @@
+ }
+ 
+ /**
+@@ -2317,13 +2400,14 @@ static void gfx_stereo_reset_classes(void) {
   *         is projected geometry through func0f0d479c's own frustum - so under
   *         the world fold the pause menu had depth, and in the headset it
   *         intersected the world.
@@ -332,7 +237,7 @@ one G_NOOP each, which changes no draw, tri, vert or texture counter.
   *
   * Returns false when 3D is off, in which case out[][] is untouched.
   */
-@@ -2036,18 +2120,23 @@
+@@ -2341,18 +2425,23 @@ static bool gfx_stereo_projection(const float P[4][4], const float mv[4][4],
          return true;
      }
  
@@ -364,15 +269,12 @@ one G_NOOP each, which changes no draw, tri, vert or texture counter.
      pdVisionStereoNoteClass(cls);
  
      if (cls == PD_DLCLASS_FLAT) {
-@@ -2055,30 +2144,74 @@
+@@ -2360,30 +2449,74 @@ static bool gfx_stereo_projection(const float P[4][4], const float mv[4][4],
          return true;
      }
  
 -    float C = conv;
 -    float eEye = e;
--    if (cls == PD_DLCLASS_GUN) {
--        // The viewmodel's own depth, or the A/B's fixed plane.
--        float d = fabsf(mv[3][2]);
 +    // WHICH VIEW SPACE does this matrix consume? A baked one is the BG's, whose
 +    // unit is bg_scale PD units (player.c mtx00015f04), and so is a plain one
 +    // whose modelview is the scaled view — which is the same test, because the
@@ -384,7 +286,9 @@ one G_NOOP each, which changes no draw, tri, vert or texture counter.
 +
 +    float C = conv * s;
 +    float eEye = e * s;
-+    if (cls == PD_DLCLASS_GUN) {
+     if (cls == PD_DLCLASS_GUN) {
+-        // The viewmodel's own depth, or the A/B's fixed plane.
+-        float d = fabsf(mv[3][2]);
 +        // D-060: the viewmodel converges at its NEAREST vertex, not at its
 +        // origin. D-055 put the origin on the panel, which left every vertex
 +        // in front of the origin — the whole muzzle end of the gun — CROSSED,
@@ -396,6 +300,9 @@ one G_NOOP each, which changes no draw, tri, vert or texture counter.
 +        float d = pdVisionStereoGunNear();
          if (!(d > 1.0f)) {
 -            d = 1.0f;       // a modelview with no translation: nothing to converge on
+-        }
+-        if (d > 4000.0f) {
+-            d = 4000.0f;
 +            // No measurement yet (the first frame, or a gun-classed list with
 +            // no vertices): fall back to the modelview's own origin depth.
 +            d = fabsf(mv[3][2]);
@@ -406,9 +313,6 @@ one G_NOOP each, which changes no draw, tri, vert or texture counter.
 +                d = 4000.0f;
 +            }
          }
--        if (d > 4000.0f) {
--            d = 4000.0f;
--        }
          C = (gunConv > 0.0f) ? gunConv : d;
          eEye = e * C / conv;
 -        pdVisionStereoNoteGunDepth(d);
@@ -444,18 +348,18 @@ one G_NOOP each, which changes no draw, tri, vert or texture counter.
 +        // would be a world-space shift, and the sky at 2 x zfar wants only the
 +        // infinity term anyway.
 +        out[3][0] -= eEye * a;
++    }
++    const float skew = a * eEye / C;
++    for (int r = 0; r < 4; r++) {
++        out[r][0] += skew * out[r][3];
      }
 -    // The skew: the whole of the sky's disparity, and the convergence of the
 -    // world's and the gun's.
 -    out[2][0] += -a * eEye / C;
-+    const float skew = a * eEye / C;
-+    for (int r = 0; r < 4; r++) {
-+        out[r][0] += skew * out[r][3];
-+    }
      return true;
  }
  
-@@ -2129,9 +2262,21 @@
+@@ -2434,9 +2567,21 @@ static void gfx_sp_matrix(uint8_t parameters, const int32_t* addr) {
              // pending tag is one-shot: an untagged load is WORLD (D-055).
              pd_stereo.p_class = pd_stereo.pending_class;
              pd_stereo.pending_class = PD_DLCLASS_WORLD;
@@ -477,10 +381,10 @@ one G_NOOP each, which changes no draw, tri, vert or texture counter.
              // A MUL into the projection KEEPS the class: it is the same camera
              // and the same subject, with a transform folded in. This is the
              // half the old matrix-shape test could not do — 4J's XBLA lists
-@@ -2382,6 +2527,16 @@
- 
-         x = gfx_adjust_x_for_aspect_ratio(x, w);
- 
+@@ -2691,6 +2836,15 @@ static inline __attribute__((always_inline)) void gfx_sp_load_vertex(struct Load
+             x += taa_jx * w;
+             y += taa_jy * w;
+         }
 +#if PD_VISION_STEREO
 +        // D-060: how near does the VIEWMODEL actually come? w is the view depth
 +        // under every projection this engine loads, so the gun's nearest vertex
@@ -490,11 +394,10 @@ one G_NOOP each, which changes no draw, tri, vert or texture counter.
 +            pdVisionStereoNoteGunVertex(w);
 +        }
 +#endif
-+
+ 
          if (rsp.geometry_mode & G_LIGHTING) {
              gfx_light_vertex(d, px, py, pz, vcn->x, vcn->y, vcn->z, &U, &V);
-         } else {
-@@ -3792,6 +3947,32 @@
+@@ -4479,6 +4633,32 @@ static void gfx_draw_rectangle(int32_t ulx, int32_t uly, int32_t lrx, int32_t lr
      lrxf = lrxf / (4.0f * HALF_SCREEN_WIDTH) - 1.0f;
      lryf = -(lryf / (4.0f * HALF_SCREEN_HEIGHT)) + 1.0f;
  
@@ -527,7 +430,7 @@ one G_NOOP each, which changes no draw, tri, vert or texture counter.
      ulxf = gfx_adjust_x_for_aspect_ratio(ulxf);
      lrxf = gfx_adjust_x_for_aspect_ratio(lrxf);
  
-@@ -4682,6 +4863,15 @@
+@@ -5892,6 +6072,15 @@ extern "C" void gfx_run(Gfx* commands) {
      }
  #endif
      gfx_run_eye(commands);
@@ -543,3 +446,102 @@ one G_NOOP each, which changes no draw, tri, vert or texture counter.
  }
  
  extern "C" void gfx_set_pre_swap_callback(GfxPreSwapCallback cb) {
+diff --git a/src/game/artifact.c b/src/game/artifact.c
+index 775d7c9d1..1b2bde897 100644
+--- a/src/game/artifact.c
++++ b/src/game/artifact.c
+@@ -924,6 +924,19 @@ Gfx *artifactsRenderGlaresForRoom(Gfx *gdl, s32 roomnum)
+ 						}
+ #endif
+ 
++#ifndef PLATFORM_N64
++						// The glare's own VIEW DEPTH (D-060). A glare is a
++						// screen-space texture rectangle at a position this
++						// function projected itself, so it has no matrix and
++						// the visionOS stereo fold cannot give it a disparity:
++						// it lands ON the panel while its light fixture is at
++						// its own depth. Austin, in the headset on 0.0.0.10:
++						// "every time i look at a light, it hurts". The tag
++						// hands the renderer the depth, and it shifts the
++						// rectangle per eye. One tag, one rectangle.
++						gDPPdDlTag(gdl++, PD_DLTAG_DEPTH(
++							(s32)(-lightscreenpos.z < 1.0f ? 1.0f : -lightscreenpos.z)));
++#endif
+ 						func0f0b2740(&gdl, spdc, spd4, 64, 64, false, false, false, 1);
+ 
+ 						if (extra) {
+@@ -938,6 +951,12 @@ Gfx *artifactsRenderGlaresForRoom(Gfx *gdl, s32 roomnum)
+ 							spd4[0] = f24 * 0.4f;
+ 							spd4[1] = f26 * 0.4f;
+ 
++#ifndef PLATFORM_N64
++							// ...and the inner, brighter core of the same
++							// glare, at the same depth (D-060).
++							gDPPdDlTag(gdl++, PD_DLTAG_DEPTH(
++								(s32)(-lightscreenpos.z < 1.0f ? 1.0f : -lightscreenpos.z)));
++#endif
+ 							func0f0b2740(&gdl, spdc, spd4, 64, 64, false, false, false, 1);
+ 						}
+ 
+diff --git a/src/game/bg.c b/src/game/bg.c
+index b12846fcc..443abcf09 100644
+--- a/src/game/bg.c
++++ b/src/game/bg.c
+@@ -2558,6 +2558,18 @@ Gfx *bgRender(Gfx *gdl)
+ {
+ 	gdl = lightsSetDefault(gdl);
+ 
++#ifndef PLATFORM_N64
++	// The frame's BG-to-GFX scale, for the visionOS stereo fold (D-060). The
++	// rooms are drawn through a view matrix whose linear part has been
++	// multiplied by this (player.c, mtx00015f04(scale, &sp8c)), so the room's
++	// view space is `scale` times the one every prop, chr and viewmodel is in.
++	// An eye offset of e view units is then e/scale PD units for the floor and
++	// e for the body standing on it: two different interoculars for one scene.
++	// This is the first thing the whole frame emits, so nothing drawn under the
++	// BG's own matrices can miss it.
++	gDPPdDlTag(gdl++, PD_DLTAG_SCALE(bgGetScaleBg2Gfx()));
++#endif
++
+ 	gSPSegment(gdl++, SPSEGMENT_BG_DL, g_BgPrimaryData);
+ 
+ 	gdl = envStartFog(gdl, false);
+diff --git a/src/include/gbiex.h b/src/include/gbiex.h
+index 3e03df788..dafe7b2b7 100644
+--- a/src/include/gbiex.h
++++ b/src/include/gbiex.h
+@@ -256,6 +256,34 @@
+ #define PD_DLSPAN_FLAT_BEGIN  8
+ #define PD_DLSPAN_FLAT_END    9
+ 
++/*
++ * Two payloads that carry a NUMBER rather than a class (D-060). The class
++ * values above are all < 8, so the top two bits are free to say "this tag is a
++ * number, and here is which one".
++ *
++ *   0x8000 | d : the VIEW DEPTH, in PD units, of the next 2D rectangle. PD
++ *                draws its light glares as screen-space texture rectangles at
++ *                a position it projected itself (artifact.c), so they have no
++ *                matrix and therefore no disparity - they sit ON the panel
++ *                while the fixture they belong to sits at its own depth, which
++ *                is what Austin reported as "every time i look at a light, it
++ *                hurts". The tag is consumed by ONE rectangle and hands the
++ *                renderer the depth it needs to shift that rectangle per eye.
++ *
++ *   0x4000 | s : bgGetScaleBg2Gfx() x 1024, STICKY for the rest of the frame.
++ *                The rooms are drawn in a view space scaled by this (player.c
++ *                mtx00015f04(scale, &sp8c)), so an eye offset expressed in
++ *                view units means a different PHYSICAL separation for the room
++ *                than for the body standing in it. Half on Villa, Crash Site
++ *                and Air Base, and anything at all while a scope is zoomed.
++ */
++#define PD_DLTAG_DEPTH_BIT    0x8000u
++#define PD_DLTAG_DEPTH(d)     (PD_DLTAG_DEPTH_BIT | ((unsigned int)(d) & 0x7fffu))
++#define PD_DLTAG_SCALE_BIT    0x4000u
++#define PD_DLTAG_SCALE_SHIFT  1024.0f
++#define PD_DLTAG_SCALE(s)     (PD_DLTAG_SCALE_BIT | \
++		((unsigned int)((s) * PD_DLTAG_SCALE_SHIFT) & 0x3fffu))
++
+ #define gDPPdDlTag(pkt, x) gDPNoOpTag(pkt, PD_DLTAG(x))
+ 
+ /* G_EXTRAGEOMETRYMODE flags */

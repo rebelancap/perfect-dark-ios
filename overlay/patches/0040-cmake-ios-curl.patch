@@ -28,9 +28,11 @@ this one was - so a tree without the symlinks still builds.
 The desktop path is untouched by a byte: WIN32 and the generic `else()` are
 exactly upstream's, and PD_IOS is false in every desktop configure.
 
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 3bc021b45..ecf3ef2a8 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -289,6 +289,54 @@
+@@ -315,6 +315,54 @@ if(WIN32)
    # because certificates are the operating system's business.
    message(STATUS "using WinHTTP - ghost server support enabled")
    list(APPEND LIBS winhttp)

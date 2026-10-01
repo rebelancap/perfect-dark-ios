@@ -75,9 +75,11 @@ Everywhere but visionOS PD_VISION_STEREO is 0 and every line of this is
 preprocessed away. At Stereo Depth 0 % `e` is zero, the fold returns before any
 of it, and the two eyes stay bit-identical - which the gates run.
 
+diff --git a/port/fast3d/gfx_pc.cpp b/port/fast3d/gfx_pc.cpp
+index 8a094bddc..9257c5f97 100644
 --- a/port/fast3d/gfx_pc.cpp
 +++ b/port/fast3d/gfx_pc.cpp
-@@ -86,6 +86,9 @@
+@@ -88,6 +88,9 @@ extern "C" void pdVisionStereoNoteGunDepth(float depth);
  // depth-tagged 2D rectangle (a light glare) needs to sit on its own fixture.
  extern "C" float pdVisionStereoGunNear(void);
  extern "C" void pdVisionStereoNoteGunVertex(float depth);
@@ -87,7 +89,7 @@ of it, and the two eyes stay bit-identical - which the gates run.
  #else
  #define PD_VISION_STEREO 0
  #endif
-@@ -1944,8 +1947,37 @@
+@@ -2272,8 +2275,37 @@ struct PDStereoState {
      float bg_scale;     // bgGetScaleBg2Gfx() for this frame (PD_DLTAG_SCALE)
      float depth_tag;    // the view depth of the next 2D rect, 0 = none
      float world_a;      // P[0][0] of the last PLAIN perspective load
@@ -126,7 +128,7 @@ of it, and the two eyes stay bit-identical - which the gates run.
  
  // What one eye of the last completed frame saw, for `3d state`. The MUL count
  // is here because D-055 asserted "PD's lists MULTIPLY into the projection" with
-@@ -1987,6 +2019,7 @@
+@@ -2315,6 +2347,7 @@ static void gfx_stereo_reset_classes(void) {
      pd_stereo.bg_scale = 1.0f;
      pd_stereo.depth_tag = 0.0f;
      pd_stereo.world_a = 0.0f;
@@ -134,7 +136,7 @@ of it, and the two eyes stay bit-identical - which the gates run.
      pd_stereo_mul_p = 0;
      pd_stereo_load_p = 0;
      pd_stereo_baked = 0;
-@@ -2090,6 +2123,10 @@
+@@ -2418,6 +2451,10 @@ static bool gfx_stereo_projection(const float P[4][4], const float mv[4][4],
          return false;
      }
      memcpy(out, P, 16 * sizeof(float));
@@ -145,7 +147,7 @@ of it, and the two eyes stay bit-identical - which the gates run.
      if (e == 0.0f) {
          // Stereo Depth 0 %: the mono projection in both eyes, bit for bit. The
          // gate leans on this - an L/R pair taken at 0 % must be pixel-identical
-@@ -2185,7 +2222,71 @@
+@@ -2513,7 +2550,71 @@ static bool gfx_stereo_projection(const float P[4][4], const float mv[4][4],
          // infinity term anyway.
          out[3][0] -= eEye * a;
      }
@@ -218,7 +220,7 @@ of it, and the two eyes stay bit-identical - which the gates run.
      for (int r = 0; r < 4; r++) {
          out[r][0] += skew * out[r][3];
      }
-@@ -2328,6 +2429,28 @@
+@@ -2830,6 +2931,28 @@ static inline __attribute__((always_inline)) void gfx_sp_load_vertex(struct Load
          const float z = pos[2];
          const float w = pos[3];
  
@@ -246,8 +248,8 @@ of it, and the two eyes stay bit-identical - which the gates run.
 +
          x = gfx_adjust_x_for_aspect_ratio(x, w);
  
- #if PD_VISION_STEREO
-@@ -3750,7 +3873,16 @@
+         if (taa_active && !fbActive) {
+@@ -4652,7 +4775,16 @@ static void gfx_draw_rectangle(int32_t ulx, int32_t uly, int32_t lrx, int32_t lr
          float eSigned = 0.0f, conv = 0.0f, gunConv = 0.0f;
          if (pdVisionStereoFold(&eSigned, &conv, &gunConv) && eSigned != 0.0f &&
              conv > 0.0f && pd_stereo.world_a != 0.0f) {

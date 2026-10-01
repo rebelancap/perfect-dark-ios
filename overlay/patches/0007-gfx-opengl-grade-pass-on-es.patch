@@ -24,10 +24,10 @@ ANGLE-Metal. Desktop behaviour is unchanged: same shaders, same version line,
 same glBindFragDataLocation call.
 
 diff --git a/port/fast3d/gfx_opengl.cpp b/port/fast3d/gfx_opengl.cpp
-index 765a09ffb..76130e5ed 100644
+index 4693ca6ba..fe43b5436 100644
 --- a/port/fast3d/gfx_opengl.cpp
 +++ b/port/fast3d/gfx_opengl.cpp
-@@ -1169,7 +1169,11 @@ static void gfx_opengl_start_frame(void) {
+@@ -1321,7 +1321,11 @@ static void gfx_opengl_start_frame(void) {
   * space: it is how a television's "brightness", "colour" and "contrast"
   * knobs work, and what those knobs do is what was asked for.
   *
@@ -40,7 +40,7 @@ index 765a09ffb..76130e5ed 100644
   * Everything it touches is put back, since the renderer resets nothing at the
   * top of a frame.
   */
-@@ -1179,7 +1183,6 @@ static int grade_width, grade_height;
+@@ -1331,7 +1335,6 @@ static int grade_width, grade_height;
  static bool grade_failed;
  
  static const char *grade_vs =
@@ -48,7 +48,7 @@ index 765a09ffb..76130e5ed 100644
      "out vec2 vUV;\n"
      "void main() {\n"
      "    vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));\n"
-@@ -1188,7 +1191,6 @@ static const char *grade_vs =
+@@ -1340,7 +1343,6 @@ static const char *grade_vs =
      "}\n";
  
  static const char *grade_fs =
@@ -56,7 +56,7 @@ index 765a09ffb..76130e5ed 100644
      "uniform sampler2D uTex;\n"
      "uniform float uSaturation;\n"
      "uniform float uContrast;\n"
-@@ -1208,7 +1210,14 @@ static GLuint gfx_opengl_grade_compile(GLenum type, const char *src) {
+@@ -1360,7 +1362,14 @@ static GLuint gfx_opengl_grade_compile(GLenum type, const char *src) {
      GLuint sh = glCreateShader(type);
      GLint ok = 0;
  
@@ -72,7 +72,7 @@ index 765a09ffb..76130e5ed 100644
      glCompileShader(sh);
      glGetShaderiv(sh, GL_COMPILE_STATUS, &ok);
  
-@@ -1235,7 +1244,7 @@ static bool gfx_opengl_grade_init(void) {
+@@ -1387,7 +1396,7 @@ static bool gfx_opengl_grade_init(void) {
      GLuint vs, fs;
      GLint ok = 0;
  
@@ -81,7 +81,7 @@ index 765a09ffb..76130e5ed 100644
          !glad_glGenVertexArrays || !glad_glCreateShader || !glad_glDrawArrays) {
          return false;
      }
-@@ -1251,7 +1260,11 @@ static bool gfx_opengl_grade_init(void) {
+@@ -1403,7 +1412,11 @@ static bool gfx_opengl_grade_init(void) {
      grade_prog = glCreateProgram();
      glAttachShader(grade_prog, vs);
      glAttachShader(grade_prog, fs);
@@ -94,7 +94,7 @@ index 765a09ffb..76130e5ed 100644
      glLinkProgram(grade_prog);
      glGetProgramiv(grade_prog, GL_LINK_STATUS, &ok);
      glDeleteShader(vs);
-@@ -1313,7 +1326,7 @@ static void gfx_opengl_grade_frame(void) {
+@@ -1465,7 +1478,7 @@ static void gfx_opengl_grade_frame(void) {
      }
  
      if (!grade_prog && !gfx_opengl_grade_init()) {
@@ -103,7 +103,7 @@ index 765a09ffb..76130e5ed 100644
          grade_failed = true;
          return;
      }
-@@ -1365,8 +1378,12 @@ static void gfx_opengl_grade_frame(void) {
+@@ -1517,8 +1530,12 @@ static void gfx_opengl_grade_frame(void) {
      if (was_scissor) glEnable(GL_SCISSOR_TEST);
      if (was_cull) glEnable(GL_CULL_FACE);
  

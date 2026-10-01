@@ -84,8 +84,9 @@ To install it:
 ### The Xbox 360 (XBLA) release (optional, and the reason for this fork)
 
 If you own the 2010 Xbox Live Arcade release of Perfect Dark, the app can draw
-4J Studios' high-resolution art instead of the N64 art. Make a folder named
-exactly **`xbla`** in the same place, and put your copy in it:
+4J Studios' high-resolution art instead of the N64 art. Put your copy in the
+**`added-content`** folder in the same place (the game makes it on its first
+launch; an older install's `xbla` folder is moved into it for you):
 
 - the archive as it came, **`.rar`** or **`.7z`** — nested folders inside are
   fine; or
@@ -102,7 +103,7 @@ reloads the level, the same as pressing **F6** on the desktop build.
 | Path | What it is |
 | --- | --- |
 | `pd.ntsc-final.z64` | the ROM (or `data/pd.ntsc-final.z64`) |
-| `xbla/` | your XBLA archive or package |
+| `added-content/` | your XBLA archive or package (and, optionally, a GoldenEye 007 ROM) |
 | `texture-packs/` | texture packs — a folder, or the `.zip`/`.7z` it came in |
 | `model-packs/` | model packs, one folder per pack |
 | `mods/` | mods and console-mod patches, exactly as downloaded |

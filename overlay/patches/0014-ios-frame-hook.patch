@@ -15,9 +15,11 @@ scripts/sim-validate.sh's assertions deterministic.
 One function, one call, behind PLATFORM_IOS: on every other platform this file
 is byte for byte upstream's.
 
---- a/port/src/pdsched.c	2026-09-12 19:26:37
-+++ b/port/src/pdsched.c	2026-09-12 21:54:19
-@@ -245,6 +245,11 @@
+diff --git a/port/src/pdsched.c b/port/src/pdsched.c
+index fe47662cb..da6d3f44d 100644
+--- a/port/src/pdsched.c
++++ b/port/src/pdsched.c
+@@ -247,6 +247,11 @@ void schedSubmitTask(OSSched *sc, OSScTask *t)
  	}
  }
  
@@ -29,7 +31,7 @@ is byte for byte upstream's.
  void schedStartFrame(OSSched *sc)
  {
  	videoStartFrame();
-@@ -280,6 +285,16 @@
+@@ -282,6 +287,16 @@ void schedEndFrame(OSSched *sc)
  {
  	sc->frameCount++;
  

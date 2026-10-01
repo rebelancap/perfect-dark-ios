@@ -18,9 +18,26 @@ So: one more injected axis, merged exactly as the left stick's already is
 the curved stick magnitude as -128..127 instead of four booleans. No control
 style changes, no bind moves, nothing outside PLATFORM_IOS.
 
+diff --git a/port/include/input.h b/port/include/input.h
+index 043b1dd13..c03a27fd9 100644
+--- a/port/include/input.h
++++ b/port/include/input.h
+@@ -242,6 +242,10 @@ void inputMouseGetRawDelta(s32 *dx, s32 *dy);
+ // :8775 bridge share. See the definitions in port/src/input.c.
+ void inputIosLookAddDegrees(f32 degx, f32 degy);
+ void inputIosPadSet(u32 buttons, s32 stickx, s32 sticky);
++// The touch stick as analogue movement. Under CONTROLMODE_PC (the port's
++// default) the right stick is movedata.analogstrafe/analogwalk - see the
++// definition in port/src/input.c.
++void inputIosPadSetRStick(s32 x, s32 y);
+ void inputIosPadSetButton(u32 button, s32 down);
+ u32 inputIosPadGetButtons(void);
+ // The absolute touch pointer that drives PD's own menu-mouse path. nx/ny are
+diff --git a/port/src/input.c b/port/src/input.c
+index 21dc7d8d9..6bc04fec8 100644
 --- a/port/src/input.c
 +++ b/port/src/input.c
-@@ -990,6 +990,7 @@
+@@ -1202,6 +1202,7 @@ static s32 iosPointerWheel = 0, iosPointerWheelFrame = 0;
  static f32 iosLookFrameX = 0.f, iosLookFrameY = 0.f;
  static u32 iosPadButtons = 0;
  static s32 iosPadStickX = 0, iosPadStickY = 0;
@@ -28,12 +45,10 @@ style changes, no bind moves, nothing outside PLATFORM_IOS.
  
  void inputIosLookAddDegrees(f32 degx, f32 degy)
  {
-@@ -1002,6 +1003,30 @@
- 	iosPadButtons = buttons;
- 	iosPadStickX = (stickx < -128) ? -128 : ((stickx > 127) ? 127 : stickx);
+@@ -1216,6 +1217,30 @@ void inputIosPadSet(u32 buttons, s32 stickx, s32 sticky)
  	iosPadStickY = (sticky < -128) ? -128 : ((sticky > 127) ? 127 : sticky);
-+}
-+
+ }
+ 
 +/**
 + * The touch stick as ANALOG MOVEMENT (Q-003, D-0xx).
 + *
@@ -56,10 +71,12 @@ style changes, no bind moves, nothing outside PLATFORM_IOS.
 +{
 +	iosPadRStickX = (x < -128) ? -128 : ((x > 127) ? 127 : x);
 +	iosPadRStickY = (y < -128) ? -128 : ((y > 127) ? 127 : y);
- }
- 
++}
++
  void inputIosPadSetButton(u32 button, s32 down)
-@@ -1037,6 +1062,13 @@
+ {
+ 	if (down) {
+@@ -1249,6 +1274,13 @@ static void inputIosMergePad(OSContPad *npad)
  		npad->stick_y = iosPadStickY;
  	}
  
@@ -73,16 +90,3 @@ style changes, no bind moves, nothing outside PLATFORM_IOS.
  }
  
  static void inputIosLatchFrame(void)
---- a/port/include/input.h
-+++ b/port/include/input.h
-@@ -227,6 +227,10 @@
- // :8775 bridge share. See the definitions in port/src/input.c.
- void inputIosLookAddDegrees(f32 degx, f32 degy);
- void inputIosPadSet(u32 buttons, s32 stickx, s32 sticky);
-+// The touch stick as analogue movement. Under CONTROLMODE_PC (the port's
-+// default) the right stick is movedata.analogstrafe/analogwalk - see the
-+// definition in port/src/input.c.
-+void inputIosPadSetRStick(s32 x, s32 y);
- void inputIosPadSetButton(u32 button, s32 down);
- u32 inputIosPadGetButtons(void);
- // The absolute touch pointer that drives PD's own menu-mouse path. nx/ny are

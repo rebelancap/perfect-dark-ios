@@ -20,10 +20,10 @@ charter's ground rule 1; it is appended to SRC_PORT_CXX and compiled as ObjC++
 (enable_language(OBJCXX)) because CAMetalLayer is an Objective-C object.
 
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index c84fdc5fd..f02af4e3a 100644
+index c7cdf21ff..a95196865 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -302,7 +302,35 @@ endif()
+@@ -328,7 +328,35 @@ endif()
  list(APPEND LIBS "${ZLIB_LIBRARY}")
  
  # GL
@@ -60,7 +60,7 @@ index c84fdc5fd..f02af4e3a 100644
    if(WIN32)
      set(GL_LIBRARY opengl32)
    elseif(NINTENDO_SWITCH)
-@@ -450,6 +478,12 @@ set(SRC_LIB
+@@ -617,6 +645,12 @@ set(SRC_LIB
  )
  list(PREPEND SRC_LIB "${CMAKE_SOURCE_DIR}")
  

@@ -1876,3 +1876,92 @@ hands; one more was applying to the wrong place and reporting `ok`.
   produce an identical 8008-line `gfx:` stream and a pixel-identical 1280×720
   frame on the rebuilt oracles. Rebuild BOTH after a bump — the gcc one is the
   only thing that can tell "clang diverged" from "upstream changed".
+
+## Traps earned (the upstream pin bump, 245eca04c -> c18645860, 1.0.1)
+
+1,282 upstream commits. 14 patches failed to apply; all 34 were rebased in one
+pass and none needed its intent changed.
+
+- **Rebase with git, not by hand.** Clone `vendor/dabs-mod` with `--shared`
+  into a scratch dir, check out the OLD pin, apply each overlay patch as its own
+  commit (commit message = patch filename), then `git rebase --onto NEW OLD`.
+  The 3-way merge follows upstream's real history instead of matching context,
+  so a hunk cannot silently land in an identically shaped array elsewhere. Then
+  regenerate each patch body from `git diff c^ c` under its original prose
+  header. 20 of 34 merged without a conflict; every hunk now applies at offset 0.
+- **Audit the rebase two ways.** (1) Each new patch's +/- lines, sorted, must
+  equal the old patch's - any difference is either deliberate or a mistake
+  (it caught a hand-resolution of 0035 that had put our span inside GE Plus's
+  early return in `sightDraw`). (2) For every changed block compare its six
+  nearest non-blank neighbours old vs new; read every block whose neighbours
+  moved. Neither found a wrong-place hit this time.
+- **`apply-overlay.sh` now passes `--forward`.** BSD patch answers its own
+  "Reversed (or previously applied) patch detected! Assume -R? [y]" with yes;
+  `--forward` turns that into a reject. `PD_OVERLAY_SHOW_OFFSETS=1` prints any
+  hunk that did not land at its own line.
+- **Upstream grew a Vulkan renderer** (`gfx_vulkan.cpp`, `PD_VULKAN` ON by
+  default, found by `find_path`). Homebrew's vulkan headers are on this Mac and
+  only a missing static shaderc keeps it out; `build-ios.sh` and both oracles
+  pass `-DPD_VULKAN=OFF`. `gfx_sdl2.cpp` dropped `SDL_WINDOW_OPENGL` from the
+  initial flags and adds it after the Vulkan branch: our ANGLE arm adds
+  `SDL_WINDOW_METAL` (and the iOS HIGHDPI flag) at that later point.
+- **`xbla/` is now `added-content/`, and the engine MOVES the old folder.**
+  `fsAddedContentDir()` renames everything in `$E/xbla` into
+  `$E/added-content` the first time it looks and removes the empty `xbla/`.
+  The shell must scan both (added-content first) or the pre-engine unpack
+  (D-020) never fires. The cache is not keyed by the archive's path.
+- **The post chain does not run on GL ES.** SMAA/FSR (`gl_es` check) and TAA
+  turn themselves off with a log line; 0041 hides their rows.
+- **Seam sealing makes single pixels flip between GPUs.** Faces at a T-junction
+  are grown exactly half a pixel, which puts their edges on pixel centres;
+  ANGLE-Metal and desktop GL break the tie differently, so 24-69 isolated pixels
+  per gate frame differ by up to 100/255. The gate now has an outlier budget
+  (D-068). Seen first as a red gate with an IDENTICAL gfx stream.
+- **The gfx stream gained a line** ("texture cache starts at ..."), and the
+  per-frame stats lines changed format: old and new `.gfx.gz` cannot be diffed
+  textually, compare the `gfx: N draws, T tris, V verts` tuples instead.
+- **Bisecting the oracle is cheap**: an incremental clang build plus a 12-frame
+  `--exit-frame` run is under two minutes a step. For an XBLA bisect, put the
+  archive in BOTH `xbla/` and `added-content/` of the run dir, or the commits
+  before the move find nothing.
+- **The bridge's injected pad does not reach front-end menus while the touch
+  layer is in menu mode**; `touch off` + `pad fake on` and it does. D-pad down
+  (`pad down`) never moves a menu unless Akimbo Triggers is on - upstream's
+  rule, not ours; real pads use the stick.
+  **Why (verified 2026-10-01): it is the bridge, not the pad.** `pad <btn>` sets
+  bits in the touch layer's own mask (`inputIosPadSetButton` -> `iosPadButtons`),
+  and a VISIBLE layer calls `inputIosPadSet(mask, 0, 0)` with its whole mask every
+  frame, erasing the injected bit (read back as 0 within 300 ms) before the engine
+  usually latches it - so it sometimes wins the race, which makes a single run look
+  flaky rather than dead. A real controller is read from SDL binds in
+  `inputReadController()` and the layer's mask is only OR-ed on top
+  (`inputIosMergePad`); auto mode also hides the layer when a pad connects. The
+  visionOS gate's "pad reaches the engine" step only sets and reads that bit inside
+  one enqueued block - it proves the seam, not engine consumption and not SDL.
+- **The 3D `--gun` pass's `GUN_BOX` is a determinism input that upstream can move.**
+  At c18645860 the Falcon 2 sits ~15-20 px further right/up and the box's corner
+  block is floor (+2 px), so `stereo-disparity.py` reports a D-061 FAIL on a frame
+  that obeys D-061. Read the per-block map (every block above the clamp must be on
+  the weapon, and nothing else above it) before believing the box;
+  `artifacts/sim/visionos-3d/bump-1.0.1/gun/08d`. **Refit 2026-10-01 to
+  `816,528,912,624`** (offline re-read of the bump captures: n=4, all +20, D-061 OK).
+- **Upstream's glare occlusion queries run once per EYE WALK.** `gfx_run` walks the
+  list twice in 3D, `gfx_occlusion_test` reuses one query object per slot, so the
+  answer read two frames later is the RIGHT eye's, probed at the mono pixel (the 1-px
+  rect is not depth-tagged, so it is not shifted). Both eyes still agree - the game
+  decides once per frame - and glares measured identical in L, R and 2D. Only a light
+  right at an occluder edge can decide differently from 2D, by half its disparity.
+- **The shipped convergence hides a glare's depth.** At C=762 the dev2-stereo glare
+  fixture (frame 1295) sits almost on the convergence plane (-0.2 px), so the
+  ratio test is noise; pin `vp3d.conv` to 610 (`simctl spawn <sim> defaults write
+  com.rebelancap.perfectdark vp3d.conv -float 610`) to repeat it. Isolate a glare by
+  subtracting a `Video.GlareBrightness=0` replay of the same frame.
+- **Importing a script under `scripts/` from Python writes `scripts/__pycache__`**,
+  which is a file under `scripts/` newer than the gate stamps. Use `python3 -B`.
+- **`lldb` cannot launch the oracle headlessly** ("cannot get permission to
+  debug processes"); to flip a variable, rebuild a scratch oracle with it.
+- **Fast-forward `main` without touching the working tree.** `publish-ota.sh`
+  rejects a stamp if any file under `app/ overlay/ scripts/` is newer than it;
+  `git checkout main && git merge --ff-only` rewrites every changed file. Use
+  `git branch -f main <branch>` (or `update-ref`) while on the branch, then
+  `git checkout main` - same commit, no file written.

@@ -38,9 +38,52 @@ hidden by this patch at all - they gate themselves on ghostnetIsAvailable()
 Every hunk is `#ifndef PLATFORM_IOS` (or one `#ifdef`) around an existing array
 entry; no other platform's menus change by a byte.
 
+diff --git a/port/src/optionsmenu.c b/port/src/optionsmenu.c
+index 24e6671be..f78ff00a0 100644
+--- a/port/src/optionsmenu.c
++++ b/port/src/optionsmenu.c
+@@ -5694,7 +5694,16 @@ struct menudialogdef g_ExtendedDabsModMissionMenuDialog = {
+ 	g_ExtendedDabsModMissionMenuItems,
+ 	NULL,
+ 	MENUDIALOGFLAG_LITERAL_TEXT,
++	// Recording is the last page in the chain, and on iOS there is no recorder
++	// to configure: record.c is compiled out because system() is
++	// API_UNAVAILABLE(ios) and there is no second binary to spawn anyway
++	// (patch 0011, docs/ios-deadlist.md §1). Ending the chain here is what
++	// takes the page off the phone; nothing else in the file changes.
++#ifdef PLATFORM_IOS
++	NULL,
++#else
+ 	&g_ExtendedDabsModRecordingMenuDialog,
++#endif
+ };
+ 
+ struct menudialogdef g_ExtendedDabsModDisplayMenuDialog = {
+@@ -6994,6 +7003,11 @@ struct menuitem g_ExtendedTexturePackMenuItems[] = {
+ 		0,
+ 		NULL,
+ 	},
++	// Dump All Assets writes gigabytes into the user's Documents container and
++	// then the app is killed for disk pressure, or the phone fills up
++	// (docs/ios-deadlist.md §6). The CLI flags still work on the macOS oracle,
++	// which is where anybody dumping assets actually is.
++#ifndef PLATFORM_IOS
+ 	{
+ 		MENUITEMTYPE_SELECTABLE,
+ 		0,
+@@ -7010,6 +7024,7 @@ struct menuitem g_ExtendedTexturePackMenuItems[] = {
+ 		0,
+ 		menuhandlerAssetDumpStatus,
+ 	},
++#endif
+ 	{
+ 		MENUITEMTYPE_SELECTABLE,
+ 		0,
+diff --git a/src/game/mainmenu.c b/src/game/mainmenu.c
+index a8e01f206..fa4568ce9 100644
 --- a/src/game/mainmenu.c
 +++ b/src/game/mainmenu.c
-@@ -5206,6 +5206,20 @@
+@@ -5310,6 +5310,20 @@ struct menuitem g_MainMenuMenuItems[] = {
  		(void *)&g_ChangeAgentMenuDialog,
  	},
  #ifndef PLATFORM_N64
@@ -61,50 +104,11 @@ entry; no other platform's menus change by a byte.
  	{
  		MENUITEMTYPE_SELECTABLE,
  		0,
-@@ -5231,6 +5245,7 @@
+@@ -5334,6 +5348,7 @@ struct menuitem g_MainMenuMenuItems[] = {
+ 		0x00000007,
  		(void *)&g_ExitGameMenuDialog,
  	},
- #endif
 +#endif
+ #endif
  	{ MENUITEMTYPE_END },
  };
- 
---- a/port/src/optionsmenu.c
-+++ b/port/src/optionsmenu.c
-@@ -4620,7 +4620,16 @@
- 	g_ExtendedDabsModMissionMenuItems,
- 	NULL,
- 	MENUDIALOGFLAG_LITERAL_TEXT,
-+	// Recording is the last page in the chain, and on iOS there is no recorder
-+	// to configure: record.c is compiled out because system() is
-+	// API_UNAVAILABLE(ios) and there is no second binary to spawn anyway
-+	// (patch 0011, docs/ios-deadlist.md §1). Ending the chain here is what
-+	// takes the page off the phone; nothing else in the file changes.
-+#ifdef PLATFORM_IOS
-+	NULL,
-+#else
- 	&g_ExtendedDabsModRecordingMenuDialog,
-+#endif
- };
- 
- struct menudialogdef g_ExtendedDabsModDisplayMenuDialog = {
-@@ -5746,6 +5755,11 @@
- 		0,
- 		NULL,
- 	},
-+	// Dump All Assets writes gigabytes into the user's Documents container and
-+	// then the app is killed for disk pressure, or the phone fills up
-+	// (docs/ios-deadlist.md §6). The CLI flags still work on the macOS oracle,
-+	// which is where anybody dumping assets actually is.
-+#ifndef PLATFORM_IOS
- 	{
- 		MENUITEMTYPE_SELECTABLE,
- 		0,
-@@ -5762,6 +5776,7 @@
- 		0,
- 		menuhandlerAssetDumpStatus,
- 	},
-+#endif
- 	{
- 		MENUITEMTYPE_SELECTABLE,
- 		0,

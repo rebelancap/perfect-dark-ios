@@ -46,9 +46,11 @@ disappear with it, the pre-swap capture's guard disappears, and gfx_run is
 gfx_run_eye plus one tail call. The oracle's byte-for-byte replay parity is the
 proof and the gate runs it.
 
+diff --git a/port/fast3d/gfx_pc.cpp b/port/fast3d/gfx_pc.cpp
+index ac253862f..f1b4fb617 100644
 --- a/port/fast3d/gfx_pc.cpp
 +++ b/port/fast3d/gfx_pc.cpp
-@@ -40,6 +40,51 @@
+@@ -42,6 +42,51 @@
  #include "pd_frame_prof.h"
  #endif
  
@@ -100,7 +102,7 @@ proof and the gate runs it.
  uintptr_t gfxFramebuffer;
  
  #define ALIGN(x, a) (((x) + (a - 1)) & ~(a - 1))
-@@ -1813,6 +1858,221 @@
+@@ -2141,6 +2186,221 @@ static void gfx_matrix_mul(float res[4][4], const float a[4][4], const float b[4
      memcpy(res, tmp, sizeof(tmp));
  }
  
@@ -322,7 +324,7 @@ proof and the gate runs it.
  static void gfx_sp_matrix(uint8_t parameters, const int32_t* addr) {
      float matrix[4][4];
  
-@@ -1841,8 +2101,20 @@
+@@ -2169,8 +2429,20 @@ static void gfx_sp_matrix(uint8_t parameters, const int32_t* addr) {
      if (parameters & G_MTX_PROJECTION) {
          if (parameters & G_MTX_LOAD) {
              memcpy(rsp.P_matrix, matrix, sizeof(matrix));
@@ -343,7 +345,7 @@ proof and the gate runs it.
          }
      } else { // G_MTX_MODELVIEW
          if ((parameters & G_MTX_PUSH) && rsp.modelview_matrix_stack_size < 11) {
-@@ -1858,7 +2130,7 @@
+@@ -2186,7 +2458,7 @@ static void gfx_sp_matrix(uint8_t parameters, const int32_t* addr) {
          }
          rsp.lights_changed = 1;
      }
@@ -352,7 +354,7 @@ proof and the gate runs it.
  }
  
  static void gfx_sp_pop_matrix(uint32_t count) {
-@@ -1866,8 +2138,7 @@
+@@ -2194,8 +2466,7 @@ static void gfx_sp_pop_matrix(uint32_t count) {
          if (rsp.modelview_matrix_stack_size > 0) {
              --rsp.modelview_matrix_stack_size;
              if (rsp.modelview_matrix_stack_size > 0) {
@@ -362,7 +364,7 @@ proof and the gate runs it.
              }
          }
      }
-@@ -3572,6 +3843,13 @@
+@@ -4925,6 +5196,13 @@ static void gfx_run_dl(Gfx* cmd) {
          switch (opcode) {
                  // RSP commands:
              case G_NOOP:
@@ -376,7 +378,7 @@ proof and the gate runs it.
                  break;
              case G_MTX: {
                  gfx_sp_matrix(C0(16, 8), (const int32_t*)seg_addr(cmd->words.w1));
-@@ -3831,6 +4109,11 @@
+@@ -5265,6 +5543,11 @@ static void gfx_sp_reset() {
      rsp.modelview_matrix_stack_size = 1;
      rsp.current_num_lights = 2;
      rsp.lights_changed = true;
@@ -388,7 +390,7 @@ proof and the gate runs it.
  }
  
  extern "C" void gfx_get_dimensions(uint32_t* width, uint32_t* height, int32_t* posX, int32_t* posY) {
-@@ -4031,8 +4314,23 @@
+@@ -5484,8 +5767,23 @@ extern "C" void gfx_start_frame(void) {
  
  uint32_t num_dls = 0;
  
@@ -414,7 +416,7 @@ proof and the gate runs it.
  #ifdef PD_IOS_PROFILER
      // The prologue, which is where ANGLE-Metal asks CoreAnimation for the next
      // drawable - and blocks if they are all in flight. On a 120 Hz panel that
-@@ -4095,7 +4393,17 @@
+@@ -5552,7 +5850,17 @@ extern "C" void gfx_run(Gfx* commands) {
  
      // Last chance to read the frame back: swap_buffers_begin() presents it and
      // leaves the back buffer undefined.
@@ -433,7 +435,7 @@ proof and the gate runs it.
          gfx_pre_swap_callback();
      }
  
-@@ -4103,9 +4411,32 @@
+@@ -5560,9 +5868,32 @@ extern "C" void gfx_run(Gfx* commands) {
      pdProfEnd(PDPROF_GFXEND);
  #endif
  

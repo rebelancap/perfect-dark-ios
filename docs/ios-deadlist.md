@@ -250,3 +250,29 @@ decision.
 - Whether `exit(0)` from `gfx_sdl2.cpp:311/315` is reachable on iOS at all — if
   not, `atexit(cleanup)` never runs and `pd.ini` is *only* ever written by the
   resign-active hook.
+
+---
+
+## 13. What the c18645860 bump added (1.0.1, 2026-10-01)
+
+1,282 upstream commits. Searched for new `system`/`popen`/`fork`/`exec*`/
+`posix_spawn`/`dlopen` (none: the only ones are still `record.c` and
+`update.c:1432`), new `ghostnetSend()` call sites (four more in `update.c`,
+all behind `updateIsAvailable()`), new threads (Vulkan's `std::thread`, not
+built) and new menu rows (33 new handlers in `optionsmenu.c`).
+
+| what | where | disposition |
+|---|---|---|
+| **Update notice** — at every launch, asks GitHub for a newer desktop build and opens a "new version" dialog on the main menu | `updatemenu.c` `updatenoticeStart()` (from `main.c`), gated on `updateIsAvailable()` | **COMPILE OUT** by gate: patch **0041** makes `updateIsAvailable()` false on iOS, which also takes every `update.c` network site with it |
+| **Patch notes popup** — Dab's desktop changelog, once after an update (all 29 entries to an install whose `pd.ini` predates them) | `patchnotes.c` `patchnotesInit()` | **SEAM** (0041): marked seen on iOS, never opens. The notes page lives under the hidden Check for Updates row |
+| **Vulkan renderer** | `gfx_vulkan.cpp`, `CMakeLists.txt` `PD_VULKAN` (found by `find_path`; Homebrew's vulkan headers are on this Mac, only a missing static shaderc keeps it off) | **COMPILE OUT**: `build-ios.sh` passes `-DPD_VULKAN=OFF`. **HIDE** Video > Renderer (0041): one renderer, and it is ANGLE-Metal, not the "OpenGL" the row names |
+| Advanced > **HiDPI Window** | `optionsmenu.c` `advancedRestartRows[0]` | **HIDE** (0041): patch 0017 forces the native drawable whatever `Video.AllowHiDpi` says |
+| Advanced > **HIDAPI Controllers** | `advancedRestartRows[2]` | **HIDE** (0041): the shell forces HIDAPI off at OVERRIDE priority (D-030) |
+| Advanced > Raw Input Controllers | `advancedRestartRows[3]` | already hidden off Windows by upstream |
+| **added-content/** — one folder for the XBLA release, the GoldenEye ROM and GoldenEye XBLA; `xbla/` is MOVED into it on first look | `fs.c` `fsAddedContentDir()`, `xblaimport.c` `xblaDetect()` | **KEEP**, and the shell follows it: `PDXbla` scans `added-content/` then `xbla/`, the Files picker copies into `added-content/` (it is a move, nothing is deleted - ground rule 5) |
+| **Restart Now** under GoldenEye XBLA: Community Edition | `optionsmenu.c` `menuhandlerGeXblaCeRestart` → `sysRequestRestart()` | **KEEP**, as the Mods page's Restart rows already were: on iOS it quits through `cleanup()` and the player relaunches. Only shown with a GoldenEye XBLA CE zip in `added-content/` |
+| Advanced > **Offer to Send Reports** (F3's Report a Problem → pdghostd) | `tracereport.c` | **KEEP**: curl is linked (D-028) and F3 is a hardware-keyboard key; the same question as Q-012 for crash reports, not new |
+| SMAA / Upscaling (FSR 1) / Supersampling / TAA | `gfx_post.cpp`, `gfx_opengl.cpp` post chain | **KEEP**, all off by default. FSR needs GL 4.2 and is skipped on ES 3.0 (`gfx_opengl_post_pass_ok`): Upscaling then falls back to a plain scaled blit. Checked on lane 3 - see `artifacts/sim/bump-1.0.1/00-README.txt` |
+| Recast/Detour (simulant navmesh, `Mod.SimBrain`) | `port/src/external/recastnavigation`, `simnav*.cpp` | **KEEP**: plain C++, builds for all four slices |
+| HDiffPatch (GoldenEye XBLA CE updater the player supplies) | `port/src/external/hdiffpatch` | **KEEP**: file I/O only |
+| Language packs | `lang/`, `tools/langpack/build.py` at build time | **KEEP**: embedded at build time by host Python |

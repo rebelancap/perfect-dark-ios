@@ -17,9 +17,11 @@ The replay gate still runs at 844x390, through PD_IOS_RENDER_SCALE=1 in the
 ANGLE glue, because the committed oracle frame is that size and a pixel diff
 is only a gate at matched resolution.
 
+diff --git a/port/fast3d/gfx_sdl2.cpp b/port/fast3d/gfx_sdl2.cpp
+index 4ab35e44b..74340b4aa 100644
 --- a/port/fast3d/gfx_sdl2.cpp
 +++ b/port/fast3d/gfx_sdl2.cpp
-@@ -100,6 +100,13 @@
+@@ -138,6 +138,13 @@ static void gfx_sdl_init(const struct GfxWindowInitSettings *set) {
      window_height = set->height;
  
  #ifdef SDL_HINT_VIDEO_HIGHDPI_DISABLED
@@ -33,18 +35,18 @@ is only a gate at matched resolution.
      if (!set->allow_hidpi) {
          // HiDPI control, if available
          SDL_SetHint(SDL_HINT_VIDEO_HIGHDPI_DISABLED, "1");
-@@ -109,6 +116,7 @@
+@@ -146,6 +153,7 @@ static void gfx_sdl_init(const struct GfxWindowInitSettings *set) {
+         SDL_SetHint(SDL_HINT_WINDOWS_DPI_AWARENESS, "permonitor");
  #endif
      }
- #endif
 +#endif
+ #endif
  
      if (SDL_Init(SDL_INIT_VIDEO) != 0) {
-         sysFatalSetupError("Could not init SDL:\n%s", SDL_GetError());
-@@ -145,6 +153,15 @@
+@@ -207,6 +215,15 @@ static void gfx_sdl_init(const struct GfxWindowInitSettings *set) {
      // ANGLE draws into the window's CAMetalLayer; SDL must not make a GL
      // context of its own, so SDL_WINDOW_OPENGL must NOT be set here.
-     Uint32 flags = SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_METAL;
+     flags |= SDL_WINDOW_METAL;
 +#ifdef PLATFORM_IOS
 +    // Without this SDL's Metal view takes contentScaleFactor 1.0 and the whole
 +    // game renders at a third of the panel's pixels and is upscaled by the
@@ -55,5 +57,5 @@ is only a gate at matched resolution.
 +    flags |= SDL_WINDOW_ALLOW_HIGHDPI;
 +#endif
  #else
-     Uint32 flags = SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL;
+     flags |= SDL_WINDOW_OPENGL;
  #endif

@@ -38,9 +38,29 @@ menuProcessInput() tests before touching the mouse at all.
 
 Nothing here is reachable off iOS: every hunk is inside PLATFORM_IOS.
 
+diff --git a/port/include/input.h b/port/include/input.h
+index 90915c648..043b1dd13 100644
+--- a/port/include/input.h
++++ b/port/include/input.h
+@@ -244,6 +244,13 @@ void inputIosLookAddDegrees(f32 degx, f32 degy);
+ void inputIosPadSet(u32 buttons, s32 stickx, s32 sticky);
+ void inputIosPadSetButton(u32 button, s32 down);
+ u32 inputIosPadGetButtons(void);
++// The absolute touch pointer that drives PD's own menu-mouse path. nx/ny are
++// 0..1 across the drawable. The shell makes it active only while a menu dialog
++// is open (menuIosDialogIsOpen()) and clears it as soon as one closes.
++void inputIosPointerSet(f32 nx, f32 ny, s32 down);
++void inputIosPointerClear(void);
++void inputIosPointerAddWheel(s32 ticks);
++s32 inputIosPointerIsActive(void);
+ #endif
+ 
+ void inputMouseGetScaledDelta(f32 *dx, f32 *dy);
+diff --git a/port/src/input.c b/port/src/input.c
+index 2255b2149..21dc7d8d9 100644
 --- a/port/src/input.c
 +++ b/port/src/input.c
-@@ -983,6 +983,10 @@
+@@ -1195,6 +1195,10 @@ static inline s32 inputAxisScale(s32 x, const s32 deadzone, const f32 scale)
   * many times the consumer asks for it - the same contract mouseDX/DY have.
   */
  static f32 iosLookPendingX = 0.f, iosLookPendingY = 0.f;
@@ -51,7 +71,7 @@ Nothing here is reachable off iOS: every hunk is inside PLATFORM_IOS.
  static f32 iosLookFrameX = 0.f, iosLookFrameY = 0.f;
  static u32 iosPadButtons = 0;
  static s32 iosPadStickX = 0, iosPadStickY = 0;
-@@ -1032,6 +1036,7 @@
+@@ -1244,6 +1248,7 @@ static void inputIosMergePad(OSContPad *npad)
  	if (!npad->stick_y && iosPadStickY) {
  		npad->stick_y = iosPadStickY;
  	}
@@ -59,7 +79,7 @@ Nothing here is reachable off iOS: every hunk is inside PLATFORM_IOS.
  }
  
  static void inputIosLatchFrame(void)
-@@ -1040,7 +1045,71 @@
+@@ -1252,6 +1257,70 @@ static void inputIosLatchFrame(void)
  	iosLookFrameY = iosLookPendingY;
  	iosLookPendingX = 0.f;
  	iosLookPendingY = 0.f;
@@ -68,7 +88,7 @@ Nothing here is reachable off iOS: every hunk is inside PLATFORM_IOS.
 +	iosPointerMoved = 0;
 +	iosPointerWheelFrame = iosPointerWheel;
 +	iosPointerWheel = 0;
- }
++}
 +
 +/**
 + * The absolute pointer, which is how a finger presses a MENU ITEM.
@@ -127,11 +147,10 @@ Nothing here is reachable off iOS: every hunk is inside PLATFORM_IOS.
 +s32 inputIosPointerIsActive(void)
 +{
 +	return iosPointerActive;
-+}
+ }
  #endif
  
- s32 inputReadController(s32 idx, OSContPad *npad)
-@@ -1444,6 +1513,22 @@
+@@ -1718,6 +1787,22 @@ s32 inputKeyPressed(u32 vk)
  	}
  
  	if (vk >= VK_MOUSE_BEGIN && vk < VK_JOY_BEGIN) {
@@ -154,7 +173,7 @@ Nothing here is reachable off iOS: every hunk is inside PLATFORM_IOS.
  		return (mouseButtons & SDL_BUTTON(vk - VK_MOUSE_BEGIN + 1)) != 0;
  	}
  
-@@ -1504,6 +1589,16 @@
+@@ -1787,6 +1872,16 @@ s32 inputMouseIsLocked(void)
  
  s32 inputMouseGetPosition(s32 *x, s32 *y)
  {
@@ -168,33 +187,17 @@ Nothing here is reachable off iOS: every hunk is inside PLATFORM_IOS.
 +		return iosPointerMovedFrame;
 +	}
 +#endif
- 	if (x) *x = mouseX * videoGetNativeWidth() / videoGetWidth();
- 	if (y) *y = mouseY * videoGetNativeHeight() / videoGetHeight();
+ 	if (x) *x = mouseX * videoGetNativeWidth() / videoGetWindowWidth();
+ 	if (y) *y = mouseY * videoGetNativeHeight() / videoGetWindowHeight();
  	return (mouseDX != 0 || mouseDY != 0);
---- a/port/include/input.h
-+++ b/port/include/input.h
-@@ -229,6 +229,13 @@
- void inputIosPadSet(u32 buttons, s32 stickx, s32 sticky);
- void inputIosPadSetButton(u32 button, s32 down);
- u32 inputIosPadGetButtons(void);
-+// The absolute touch pointer that drives PD's own menu-mouse path. nx/ny are
-+// 0..1 across the drawable. The shell makes it active only while a menu dialog
-+// is open (menuIosDialogIsOpen()) and clears it as soon as one closes.
-+void inputIosPointerSet(f32 nx, f32 ny, s32 down);
-+void inputIosPointerClear(void);
-+void inputIosPointerAddWheel(s32 ticks);
-+s32 inputIosPointerIsActive(void);
- #endif
- 
- void inputMouseGetScaledDelta(f32 *dx, f32 *dy);
+diff --git a/src/game/menu.c b/src/game/menu.c
+index d363e20e4..14caa7eab 100644
 --- a/src/game/menu.c
 +++ b/src/game/menu.c
-@@ -1466,7 +1466,23 @@
- 	}
- 
+@@ -1518,6 +1518,22 @@ bool dialogChangeItemFocusWithMouse(struct menudialog *dialog, s32 mx, s32 my)
  	return false;
-+}
-+
+ }
+ 
 +#ifdef PLATFORM_IOS
 +/**
 + * Is a menu dialog up?
@@ -208,8 +211,9 @@ Nothing here is reachable off iOS: every hunk is inside PLATFORM_IOS.
 +s32 menuIosDialogIsOpen(void)
 +{
 +	return g_Menus[0].curdialog != NULL;
- }
++}
 +#endif
- 
++
  #endif
  
+ s32 dialogChangeItemFocus(struct menudialog *dialog, struct menuinputs *inputs)

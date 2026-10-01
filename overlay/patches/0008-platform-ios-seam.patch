@@ -27,6 +27,7 @@ CMake side:
     nothing changes.
 
 diff --git a/CMakeLists.txt b/CMakeLists.txt
+index a95196865..0c5b821e2 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -1,7 +1,15 @@
@@ -46,7 +47,7 @@ diff --git a/CMakeLists.txt b/CMakeLists.txt
    if(CMAKE_OSX_ARCHITECTURES MATCHES "arm64")
      # ARM Macs start at OS 11.
      set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum OS X deployment version")
-@@ -61,6 +69,11 @@
+@@ -61,6 +69,11 @@ message(STATUS "Target arch: ${TARGET_ARCH}")
  if(WIN32)
    # Windows
    set(TARGET_OS "windows")
@@ -58,7 +59,7 @@ diff --git a/CMakeLists.txt b/CMakeLists.txt
  elseif(APPLE)
    # OSX
    set(TARGET_OS "osx")
-@@ -239,9 +252,11 @@
+@@ -265,9 +278,11 @@ add_compile_options($<$<COMPILE_LANGUAGE:C>:-Wno-pointer-sign>)
  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wno-unused-function>)
  
  # Platform-specific flags
@@ -71,7 +72,7 @@ diff --git a/CMakeLists.txt b/CMakeLists.txt
  else()
    # This warning is not recognized by XCode/Clang for some reason.
    add_compile_options(-Wno-format-truncation)
-@@ -316,18 +331,27 @@
+@@ -342,18 +357,27 @@ if(PD_GL_ANGLE)
    if(NOT PD_ANGLE_DIR OR NOT PD_ANGLE_INCLUDE_DIR OR NOT PD_ANGLE_GLUE)
      message(FATAL_ERROR "PD_GL_ANGLE needs PD_ANGLE_DIR, PD_ANGLE_INCLUDE_DIR and PD_ANGLE_GLUE")
    endif()
@@ -79,10 +80,10 @@ diff --git a/CMakeLists.txt b/CMakeLists.txt
 -    message(FATAL_ERROR "PD_GL_ANGLE: no libEGL.dylib in ${PD_ANGLE_DIR}, or no glue at ${PD_ANGLE_GLUE}")
 +  if(NOT EXISTS "${PD_ANGLE_DIR}/libEGL.dylib" AND NOT EXISTS "${PD_ANGLE_DIR}/libEGL.framework")
 +    message(FATAL_ERROR "PD_GL_ANGLE: no libEGL.dylib and no libEGL.framework in ${PD_ANGLE_DIR}")
-   endif()
++  endif()
 +  if(NOT EXISTS "${PD_ANGLE_GLUE}")
 +    message(FATAL_ERROR "PD_GL_ANGLE: no glue at ${PD_ANGLE_GLUE}")
-+  endif()
+   endif()
    enable_language(OBJCXX)
    set(GL_LIBRARY "")
    include_directories(SYSTEM "${PD_ANGLE_INCLUDE_DIR}")
@@ -106,8 +107,8 @@ diff --git a/CMakeLists.txt b/CMakeLists.txt
  endif()
  
  if(NOT DEFINED GL_LIBRARY)
-@@ -349,6 +373,9 @@
-     set(EXTRA_LIBRARIES dbghelp -static-libstdc++)
+@@ -450,6 +474,9 @@ if(NOT EXTRA_LIBRARIES)
+         -Wl,-Bstatic,--whole-archive -lwinpthread -Wl,--no-whole-archive,-Bdynamic)
    elseif(NINTENDO_SWITCH)
      set(EXTRA_LIBRARIES stdc++ pthread)
 +  elseif(PD_IOS)
@@ -116,7 +117,7 @@ diff --git a/CMakeLists.txt b/CMakeLists.txt
    else()
      set(EXTRA_LIBRARIES stdc++ m dl)
    endif()
-@@ -514,10 +541,21 @@
+@@ -706,10 +733,21 @@ list(APPEND SRC ${LANGPACK_C})
  # Game target
  
  set(BIN_NAME "${BIN_BASENAME}")
@@ -141,6 +142,7 @@ diff --git a/CMakeLists.txt b/CMakeLists.txt
    set_target_properties(pd PROPERTIES WIN32_EXECUTABLE TRUE)
  endif()
 diff --git a/src/include/platform.h b/src/include/platform.h
+index 79a1864e8..3a14716b5 100644
 --- a/src/include/platform.h
 +++ b/src/include/platform.h
 @@ -11,8 +11,21 @@

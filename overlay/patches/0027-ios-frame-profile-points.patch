@@ -26,19 +26,157 @@ decode is wrapped at its five call sites for the same reason.
 `pace` is the row to read first. It is not a cost - it is what the frame had
 left over. It goes to zero exactly when the game stops making the rate.
 
+diff --git a/port/fast3d/gfx_pc.cpp b/port/fast3d/gfx_pc.cpp
+index c74068b37..ac253862f 100644
+--- a/port/fast3d/gfx_pc.cpp
++++ b/port/fast3d/gfx_pc.cpp
+@@ -38,6 +38,9 @@
+ #include "menuimage.h"
+ #include "gfx_texscale.h"
+ #include "gfx_post.h"
++#ifdef PD_IOS_PROFILER
++#include "pd_frame_prof.h"
++#endif
+ 
+ uintptr_t gfxFramebuffer;
+ 
+@@ -1761,7 +1764,23 @@ static void gfx_replacement_alpha(uint8_t* rep, int32_t rep_width, int32_t rep_h
+     }
+ }
+ 
++#ifdef PD_IOS_PROFILER
++static void import_texture_inner(int i, int tile, bool importReplacement);
++
++// One decode-and-upload, timed. A wrapper rather than begin/end inside the
++// function because import_texture() returns from several places.
+ static void import_texture(int i, int tile, bool importReplacement) {
++    pdProfBegin(PDPROF_TEX);
++    pdProfCount(PDPROF_TEX);
++    import_texture_inner(i, tile, importReplacement);
++    pdProfEnd(PDPROF_TEX);
++}
++#define PD_IMPORT_TEXTURE_IMPL import_texture_inner
++#else
++#define PD_IMPORT_TEXTURE_IMPL import_texture
++#endif
++
++static void PD_IMPORT_TEXTURE_IMPL(int i, int tile, bool importReplacement) {
+     LoadedTexture& loaded_texture = rdp.loaded_texture[rdp.texture_tile[tile].tmem];
+     const uint8_t fmt = rdp.texture_tile[tile].fmt;
+     const uint8_t siz = rdp.texture_tile[tile].siz;
+@@ -5467,6 +5486,12 @@ uint32_t num_dls = 0;
+ 
+ extern "C" void gfx_run(Gfx* commands) {
+     ++num_dls;
++#ifdef PD_IOS_PROFILER
++    // The prologue, which is where ANGLE-Metal asks CoreAnimation for the next
++    // drawable - and blocks if they are all in flight. On a 120 Hz panel that
++    // is the second wait the pacing design says must not exist.
++    pdProfBegin(PDPROF_ACQUIRE);
++#endif
+     gfx_sp_reset();
+ 
+     // puts("New frame");
+@@ -5489,8 +5514,16 @@ extern "C" void gfx_run(Gfx* commands) {
+     rendering_state.scissor = {};
+     gfx_mark_state_dirty();
+     gfx_readable_reset();
++#ifdef PD_IOS_PROFILER
++    pdProfEnd(PDPROF_ACQUIRE);
++    pdProfBegin(PDPROF_GFXDL);
++#endif
+     gfx_run_dl(commands);
+     gfx_flush_for(GFX_FLUSH_OTHER);
++#ifdef PD_IOS_PROFILER
++    pdProfEnd(PDPROF_GFXDL);
++    pdProfBegin(PDPROF_GFXEND);
++#endif
+     gfxFramebuffer = 0;
+ 
+     if (game_renders_to_framebuffer) {
+@@ -5523,6 +5556,10 @@ extern "C" void gfx_run(Gfx* commands) {
+         gfx_pre_swap_callback();
+     }
+ 
++#ifdef PD_IOS_PROFILER
++    pdProfEnd(PDPROF_GFXEND);
++#endif
++
+     gfx_wapi->swap_buffers_begin();
+ }
+ 
+@@ -5579,8 +5616,15 @@ extern "C" int gfx_occlusion_result(int slot) {
+ 
+ extern "C" void gfx_end_frame(void) {
+     if (!dropped_frame) {
++#ifdef PD_IOS_PROFILER
++        // Where a GPU that is behind shows up: finish_render() is the fence.
++        pdProfBegin(PDPROF_FINISH);
++#endif
+         gfx_rapi->finish_render();
+         gfx_wapi->swap_buffers_end();
++#ifdef PD_IOS_PROFILER
++        pdProfEnd(PDPROF_FINISH);
++#endif
+     }
+ }
+ 
+diff --git a/port/fast3d/gfx_sdl2.cpp b/port/fast3d/gfx_sdl2.cpp
+index 74340b4aa..13d4df7c4 100644
+--- a/port/fast3d/gfx_sdl2.cpp
++++ b/port/fast3d/gfx_sdl2.cpp
+@@ -28,6 +28,10 @@ extern "C" int pdAngleGetSwapInterval(void);
+ extern "C" int pdIosPacingWaitForPresent(void);
+ #endif
+ 
++#ifdef PD_IOS_PROFILER
++#include "pd_frame_prof.h"
++#endif
++
+ static SDL_Window* wnd;
+ static SDL_GLContext ctx;
+ static SDL_Renderer* renderer;
+@@ -489,10 +493,25 @@ static void gfx_sdl_swap_buffers_begin(void) {
+     // says the next frame is due, and presents once. A 0 answer means the app
+     // is backgrounded: skip the present rather than swap into a CAMetalLayer
+     // drawable the system has taken back.
++#ifdef PD_IOS_PROFILER
++    // PACE is SLACK, not cost: it is how long the frame had left over after
++    // everything else. It goes to zero exactly when the game stops making the
++    // rate, which is what makes it the first row to read.
++    pdProfBegin(PDPROF_PACE);
++    const int present = pdIosPacingWaitForPresent();
++    pdProfEnd(PDPROF_PACE);
++    if (!present) {
++        return;
++    }
++    pdProfBegin(PDPROF_SWAP);
++    pdAngleSwapBuffers();
++    pdProfEnd(PDPROF_SWAP);
++#else
+     if (!pdIosPacingWaitForPresent()) {
+         return;
+     }
+     pdAngleSwapBuffers();
++#endif
+ #else
+     if (target_fps) {
+         sync_framerate_with_timer();
+diff --git a/port/src/pdmain.c b/port/src/pdmain.c
+index 703ff6d6f..a1a0166f2 100644
 --- a/port/src/pdmain.c
 +++ b/port/src/pdmain.c
-@@ -82,6 +82,9 @@
- #include "modloader.h"
- #include "modborrow.h"
+@@ -87,6 +87,9 @@
  #include "gebean.h"
+ #include "gexfront.h"
+ #include "simnav.h"
 +#ifdef PD_IOS_PROFILER
 +#include "pd_frame_prof.h"
 +#endif
  
  extern u8 *g_MempHeap;
  extern u32 g_MempHeapSize;
-@@ -644,9 +647,25 @@
+@@ -654,9 +657,25 @@ void mainTick(void)
  	s32 i;
  
  	if (g_MainChangeToStageNum < 0) {
@@ -64,7 +202,7 @@ left over. It goes to zero exactly when the game stops making the rate.
  		joyDebugJoy();
  		schedSetCrashEnable2(false);
  
-@@ -690,6 +709,9 @@
+@@ -700,6 +719,9 @@ void mainTick(void)
  			viUpdateMode();
  		}
  
@@ -74,9 +212,11 @@ left over. It goes to zero exactly when the game stops making the rate.
  		rdpCreateTask(gdlstart, gdl, 0, (uintptr_t) &msg);
  		memaPrint();
  		profileSetMarker(PROFILE_MAINTICK_END);
+diff --git a/port/src/pdsched.c b/port/src/pdsched.c
+index da6d3f44d..d3d043ceb 100644
 --- a/port/src/pdsched.c
 +++ b/port/src/pdsched.c
-@@ -248,11 +248,50 @@
+@@ -250,11 +250,50 @@ void schedSubmitTask(OSSched *sc, OSScTask *t)
  #ifdef PLATFORM_IOS
  // app/ios/PDShell.m — the iOS shell's per-frame entry point.
  extern void pdIosFrameHook(void);
@@ -127,7 +267,7 @@ left over. It goes to zero exactly when the game stops making the rate.
  }
  
  void schedAudioFrame(OSSched *sc)
-@@ -292,8 +331,19 @@
+@@ -294,7 +333,18 @@ void schedEndFrame(OSSched *sc)
  	// this frame rather than the next. Everything the shell does to the engine
  	// happens here; nothing else in the app touches engine state off-thread.
  	// app/ios/PDShell.m.
@@ -139,18 +279,17 @@ left over. It goes to zero exactly when the game stops making the rate.
  	pdIosFrameHook();
 +#ifdef PD_IOS_PROFILER
 +	pdProfEnd(PDPROF_SHELL);
- #endif
++#endif
 +#endif
 +#ifdef PD_IOS_PROFILER
 +	pdProfBegin(PDPROF_SCHED);
-+#endif
+ #endif
  
  #if PAL
- 	if (!g_Resetting && (sc->frameCount & 1)) {
-@@ -331,7 +381,16 @@
- 	sndHandleRetrace();
+@@ -335,7 +385,16 @@ void schedEndFrame(OSSched *sc)
  	schedAudioFrame(sc);
  	schedRenderCrashPeriodically(sc->frameCount);
+ 	videoSetFrameStep(g_Vars.diffframe240);
 +#ifdef PD_IOS_PROFILER
 +	// Ends before videoEndFrame() on purpose: what that does is ENDF, and a
 +	// row that contained another row would say nothing.
@@ -164,7 +303,7 @@ left over. It goes to zero exactly when the game stops making the rate.
  
  	if (g_MainIsBooting == 0) {
  		schedConsiderScreenshot();
-@@ -339,6 +398,13 @@
+@@ -343,6 +402,13 @@ void schedEndFrame(OSSched *sc)
  
  	// check for vid mode changes
  	__scUpdateViMode();
@@ -178,13 +317,14 @@ left over. It goes to zero exactly when the game stops making the rate.
  }
  
  void schedInitArtifacts(void)
+diff --git a/port/src/xblatex.c b/port/src/xblatex.c
+index 190c9031a..a3544d0b6 100644
 --- a/port/src/xblatex.c
 +++ b/port/src/xblatex.c
-@@ -140,6 +140,23 @@
- }
+@@ -144,6 +144,23 @@ static u32 xblaTexBE32(const u8 *p)
  
  static u8 *xblaTexDecode(u32 record, s32 *outWidth, s32 *outHeight);
-+
+ 
 +#ifdef PD_IOS_PROFILER
 +#include "pd_frame_prof.h"
 +// An STFS read + LZX inflate + untile, timed at every call site. Upstream
@@ -201,10 +341,11 @@ left over. It goes to zero exactly when the game stops making the rate.
 +#else
 +#define PD_XBLA_DECODE(dst, rec, w, h) ((dst) = xblaTexDecode((rec), (w), (h)))
 +#endif
- 
++
  static void xblaTexCloseUp(void)
  {
-@@ -499,7 +516,7 @@
+ 	x360StfsStreamClose(&stream);
+@@ -997,7 +1014,7 @@ u8 *xblaTexDecodeRecord(u32 record, s32 *outWidth, s32 *outHeight)
  		return NULL;
  	}
  
@@ -213,7 +354,7 @@ left over. It goes to zero exactly when the game stops making the rate.
  
  	SDL_UnlockMutex(lock);
  
-@@ -773,7 +790,7 @@
+@@ -1272,7 +1289,7 @@ s32 xblaTexRecordIsSoft(u32 record)
  	if (softRecord[record] == XBLATEX_SOFT_UNKNOWN) {
  		// Decoded once here and thrown away; the render thread decodes it
  		// again when the list draws, which it would have done anyway.
@@ -222,7 +363,7 @@ left over. It goes to zero exactly when the game stops making the rate.
  
  		if (!rgba) {
  			SDL_UnlockMutex(lock);
-@@ -839,7 +856,8 @@
+@@ -1338,7 +1355,8 @@ const u8 *xblaTexRecordAlphaMap(u32 record, s32 *outSize)
  	}
  
  	if (!alphaTried[record]) {
@@ -232,7 +373,7 @@ left over. It goes to zero exactly when the game stops making the rate.
  
  		alphaTried[record] = 1;
  
-@@ -1042,7 +1060,7 @@
+@@ -1560,7 +1578,7 @@ u8 *xblaTexLoadReplacement(const void *addr, s32 *outWidth, s32 *outHeight)
  		return NULL;
  	}
  
@@ -241,7 +382,7 @@ left over. It goes to zero exactly when the game stops making the rate.
  
  	SDL_UnlockMutex(lock);
  
-@@ -1089,7 +1107,7 @@
+@@ -1607,7 +1625,7 @@ u8 *xblaTexLoadNumbered(s32 texturenum, s32 *outWidth, s32 *outHeight)
  		return NULL;
  	}
  
@@ -250,135 +391,3 @@ left over. It goes to zero exactly when the game stops making the rate.
  
  	SDL_UnlockMutex(lock);
  
---- a/port/fast3d/gfx_pc.cpp
-+++ b/port/fast3d/gfx_pc.cpp
-@@ -36,6 +36,9 @@
- #include "xblafont.h"
- #include "menuimage.h"
- #include "gfx_texscale.h"
-+#ifdef PD_IOS_PROFILER
-+#include "pd_frame_prof.h"
-+#endif
- 
- uintptr_t gfxFramebuffer;
- 
-@@ -1502,7 +1505,23 @@
-     }
- }
- 
-+#ifdef PD_IOS_PROFILER
-+static void import_texture_inner(int i, int tile, bool importReplacement);
-+
-+// One decode-and-upload, timed. A wrapper rather than begin/end inside the
-+// function because import_texture() returns from several places.
- static void import_texture(int i, int tile, bool importReplacement) {
-+    pdProfBegin(PDPROF_TEX);
-+    pdProfCount(PDPROF_TEX);
-+    import_texture_inner(i, tile, importReplacement);
-+    pdProfEnd(PDPROF_TEX);
-+}
-+#define PD_IMPORT_TEXTURE_IMPL import_texture_inner
-+#else
-+#define PD_IMPORT_TEXTURE_IMPL import_texture
-+#endif
-+
-+static void PD_IMPORT_TEXTURE_IMPL(int i, int tile, bool importReplacement) {
-     LoadedTexture& loaded_texture = rdp.loaded_texture[rdp.texture_tile[tile].tmem];
-     const uint8_t fmt = rdp.texture_tile[tile].fmt;
-     const uint8_t siz = rdp.texture_tile[tile].siz;
-@@ -4261,6 +4280,12 @@
- 
- extern "C" void gfx_run(Gfx* commands) {
-     ++num_dls;
-+#ifdef PD_IOS_PROFILER
-+    // The prologue, which is where ANGLE-Metal asks CoreAnimation for the next
-+    // drawable - and blocks if they are all in flight. On a 120 Hz panel that
-+    // is the second wait the pacing design says must not exist.
-+    pdProfBegin(PDPROF_ACQUIRE);
-+#endif
-     gfx_sp_reset();
- 
-     // puts("New frame");
-@@ -4282,8 +4307,16 @@
-     rendering_state.viewport = {};
-     rendering_state.scissor = {};
-     gfx_mark_state_dirty();
-+#ifdef PD_IOS_PROFILER
-+    pdProfEnd(PDPROF_ACQUIRE);
-+    pdProfBegin(PDPROF_GFXDL);
-+#endif
-     gfx_run_dl(commands);
-     gfx_flush_for(GFX_FLUSH_OTHER);
-+#ifdef PD_IOS_PROFILER
-+    pdProfEnd(PDPROF_GFXDL);
-+    pdProfBegin(PDPROF_GFXEND);
-+#endif
-     gfxFramebuffer = 0;
- 
-     if (game_renders_to_framebuffer) {
-@@ -4313,6 +4346,10 @@
-         gfx_pre_swap_callback();
-     }
- 
-+#ifdef PD_IOS_PROFILER
-+    pdProfEnd(PDPROF_GFXEND);
-+#endif
-+
-     gfx_wapi->swap_buffers_begin();
- }
- 
-@@ -4356,8 +4393,15 @@
- 
- extern "C" void gfx_end_frame(void) {
-     if (!dropped_frame) {
-+#ifdef PD_IOS_PROFILER
-+        // Where a GPU that is behind shows up: finish_render() is the fence.
-+        pdProfBegin(PDPROF_FINISH);
-+#endif
-         gfx_rapi->finish_render();
-         gfx_wapi->swap_buffers_end();
-+#ifdef PD_IOS_PROFILER
-+        pdProfEnd(PDPROF_FINISH);
-+#endif
-     }
- }
- 
---- a/port/fast3d/gfx_sdl2.cpp
-+++ b/port/fast3d/gfx_sdl2.cpp
-@@ -24,6 +24,10 @@
- #ifdef PLATFORM_IOS
- // app/ios/PDPacing.m — the display-link pacer. 1 = present now, 0 = skip.
- extern "C" int pdIosPacingWaitForPresent(void);
-+#endif
-+
-+#ifdef PD_IOS_PROFILER
-+#include "pd_frame_prof.h"
- #endif
- 
- static SDL_Window* wnd;
-@@ -435,10 +439,25 @@
-     // says the next frame is due, and presents once. A 0 answer means the app
-     // is backgrounded: skip the present rather than swap into a CAMetalLayer
-     // drawable the system has taken back.
-+#ifdef PD_IOS_PROFILER
-+    // PACE is SLACK, not cost: it is how long the frame had left over after
-+    // everything else. It goes to zero exactly when the game stops making the
-+    // rate, which is what makes it the first row to read.
-+    pdProfBegin(PDPROF_PACE);
-+    const int present = pdIosPacingWaitForPresent();
-+    pdProfEnd(PDPROF_PACE);
-+    if (!present) {
-+        return;
-+    }
-+    pdProfBegin(PDPROF_SWAP);
-+    pdAngleSwapBuffers();
-+    pdProfEnd(PDPROF_SWAP);
-+#else
-     if (!pdIosPacingWaitForPresent()) {
-         return;
-     }
-     pdAngleSwapBuffers();
-+#endif
- #else
-     if (target_fps) {
-         sync_framerate_with_timer();

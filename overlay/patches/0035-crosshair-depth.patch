@@ -62,32 +62,68 @@ run of it said "the replay never reached frame 2000".  TARGET_OS_VISION is a
 BUILD, not a MODE: the trace and both tags are behind a runtime
 pdVisionStereoIsActive() as well, so in 2D the display list is byte-identical
 to the one the oracle walks.
---- a/src/include/gbiex.h
-+++ b/src/include/gbiex.h
-@@ -243,6 +243,15 @@
- /* Span markers, sticky between the two: flatten everything drawn inside. */
- #define PD_DLSPAN_FLAT_BEGIN  8
- #define PD_DLSPAN_FLAT_END    9
-+/*
-+ * ...and a STICKY depth span (D-064). PD_DLTAG_DEPTH below is consumed by one
-+ * rectangle, which is right for a light glare (artifact.c draws one rect per
-+ * glare) and wrong for the CROSSHAIR, which sight.c draws as a dozen
-+ * gDPHudRectangle calls. Between these two markers the depth tag is not
-+ * consumed, so one trace's answer covers every piece of the reticle.
-+ */
-+#define PD_DLSPAN_DEPTH_BEGIN 10
-+#define PD_DLSPAN_DEPTH_END   11
+diff --git a/port/fast3d/gfx_pc.cpp b/port/fast3d/gfx_pc.cpp
+index 9257c5f97..1b8f7fff7 100644
+--- a/port/fast3d/gfx_pc.cpp
++++ b/port/fast3d/gfx_pc.cpp
+@@ -2274,6 +2274,7 @@ struct PDStereoState {
+     int flat_span;      // inside menuRender: flatten everything
+     float bg_scale;     // bgGetScaleBg2Gfx() for this frame (PD_DLTAG_SCALE)
+     float depth_tag;    // the view depth of the next 2D rect, 0 = none
++    int depth_span;     // D-064: the tag is STICKY, for the crosshair's dozen rects
+     float world_a;      // P[0][0] of the last PLAIN perspective load
+     // D-061, the per-vertex near clamp. Set when a WORLD-classed projection is
+     // folded and zero for every other class, so the test in gfx_sp_load_vertex
+@@ -2284,7 +2285,7 @@ struct PDStereoState {
+     float near_qm;      // the asymptote: 1/(D_min in view units)
+     float near_dq;      // near_qm - near_q0
+ };
+-static PDStereoState pd_stereo = { PD_DLCLASS_WORLD, PD_DLCLASS_WORLD, 0, 1.0f, 0.0f, 0.0f,
++static PDStereoState pd_stereo = { PD_DLCLASS_WORLD, PD_DLCLASS_WORLD, 0, 1.0f, 0.0f, 0, 0.0f,
+                                    0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
  
- /*
-  * Two payloads that carry a NUMBER rather than a class (D-060). The class
+ /**
+@@ -2333,6 +2334,11 @@ static void gfx_stereo_dl_tag(uint32_t w1) {
+     switch (payload) {
+         case PD_DLSPAN_FLAT_BEGIN: pd_stereo.flat_span = 1; break;
+         case PD_DLSPAN_FLAT_END:   pd_stereo.flat_span = 0; break;
++        // D-064: hold the depth tag across every rectangle of the crosshair,
++        // instead of the one-rect lifetime a light glare wants.
++        case PD_DLSPAN_DEPTH_BEGIN: pd_stereo.depth_span = 1; break;
++        case PD_DLSPAN_DEPTH_END:   pd_stereo.depth_span = 0;
++                                    pd_stereo.depth_tag = 0.0f; break;
+         case PD_DLCLASS_SKY:       pd_stereo.pending_class = PD_DLCLASS_SKY; break;
+         case PD_DLCLASS_GUN:       pd_stereo.pending_class = PD_DLCLASS_GUN; break;
+         default:                   pd_stereo.pending_class = PD_DLCLASS_WORLD; break;
+@@ -2346,6 +2352,7 @@ static void gfx_stereo_reset_classes(void) {
+     pd_stereo.flat_span = 0;
+     pd_stereo.bg_scale = 1.0f;
+     pd_stereo.depth_tag = 0.0f;
++    pd_stereo.depth_span = 0;
+     pd_stereo.world_a = 0.0f;
+     pd_stereo.near_k = 0.0f;
+     pd_stereo_mul_p = 0;
+@@ -4771,7 +4778,9 @@ static void gfx_draw_rectangle(int32_t ulx, int32_t uly, int32_t lrx, int32_t lr
+     // glare lands on its fixture in both eyes.
+     if (pd_stereo.depth_tag > 0.0f) {
+         const float d = pd_stereo.depth_tag;
+-        pd_stereo.depth_tag = 0.0f;   // one tag, one rectangle
++        if (!pd_stereo.depth_span) {
++            pd_stereo.depth_tag = 0.0f;   // one tag, one rectangle (a glare)
++        }
+         float eSigned = 0.0f, conv = 0.0f, gunConv = 0.0f;
+         if (pdVisionStereoFold(&eSigned, &conv, &gunConv) && eSigned != 0.0f &&
+             conv > 0.0f && pd_stereo.world_a != 0.0f) {
+diff --git a/src/game/sight.c b/src/game/sight.c
+index 6bccbf6e2..84a43dbe7 100644
 --- a/src/game/sight.c
 +++ b/src/game/sight.c
-@@ -22,7 +22,154 @@
- #ifndef PLATFORM_N64
+@@ -24,6 +24,153 @@
  #include <math.h>
  #include "video.h"
+ #include "gehud.h"
 +#endif
- 
++
 +// ---------------------------------------------------------------------------
 +// D-064: THE RETICLE'S OWN DEPTH, for the visionOS stereo fold.
 +// ---------------------------------------------------------------------------
@@ -233,13 +269,12 @@ to the one the oracle walks.
 +#endif
 +
 +#ifndef PLATFORM_N64
-+
+ 
  #define SIGHT_COLOUR ((PLAYER_EXTCFG().crosshairhealth >= CROSSHAIR_HEALTH_ON_GREEN) ? sightGetCrosshairHealthColor(g_Vars.currentplayer->bondhealth, g_Vars.currentplayer->prop->chr->cshield * 0.125f) : PLAYER_EXTCFG().crosshaircolour)
  #define SIGHT_SCALE PLAYER_EXTCFG().crosshairsize
- 
-@@ -1643,6 +1790,20 @@
- 
- 	sightTick(sighton);
+@@ -1721,6 +1868,20 @@ Gfx *sightDraw(Gfx *gdl, bool sighton, s32 sight)
+ 	}
+ #endif
  
 +#if defined(TARGET_OS_VISION) && TARGET_OS_VISION
 +	// D-064: one trace, one tag, and every rectangle of the reticle inside the
@@ -258,7 +293,7 @@ to the one the oracle walks.
  	switch (sight) {
  	case SIGHT_DEFAULT:
  		gdl = sightDrawDefault(gdl, sighton && optionsGetSightOnScreen(g_Vars.currentplayerstats->mpindex), crossx, crossy);
-@@ -1679,6 +1840,12 @@
+@@ -1757,6 +1918,12 @@ Gfx *sightDraw(Gfx *gdl, bool sighton, s32 sight)
  		}
  	}
  
@@ -271,53 +306,23 @@ to the one the oracle walks.
  	g_ScaleX = 1;
  
  	return gdl;
---- a/port/fast3d/gfx_pc.cpp
-+++ b/port/fast3d/gfx_pc.cpp
-@@ -1946,6 +1946,7 @@
-     int flat_span;      // inside menuRender: flatten everything
-     float bg_scale;     // bgGetScaleBg2Gfx() for this frame (PD_DLTAG_SCALE)
-     float depth_tag;    // the view depth of the next 2D rect, 0 = none
-+    int depth_span;     // D-064: the tag is STICKY, for the crosshair's dozen rects
-     float world_a;      // P[0][0] of the last PLAIN perspective load
-     // D-061, the per-vertex near clamp. Set when a WORLD-classed projection is
-     // folded and zero for every other class, so the test in gfx_sp_load_vertex
-@@ -1956,7 +1957,7 @@
-     float near_qm;      // the asymptote: 1/(D_min in view units)
-     float near_dq;      // near_qm - near_q0
- };
--static PDStereoState pd_stereo = { PD_DLCLASS_WORLD, PD_DLCLASS_WORLD, 0, 1.0f, 0.0f, 0.0f,
-+static PDStereoState pd_stereo = { PD_DLCLASS_WORLD, PD_DLCLASS_WORLD, 0, 1.0f, 0.0f, 0, 0.0f,
-                                    0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+diff --git a/src/include/gbiex.h b/src/include/gbiex.h
+index dafe7b2b7..f4abd2d81 100644
+--- a/src/include/gbiex.h
++++ b/src/include/gbiex.h
+@@ -255,6 +255,15 @@
+ /* Span markers, sticky between the two: flatten everything drawn inside. */
+ #define PD_DLSPAN_FLAT_BEGIN  8
+ #define PD_DLSPAN_FLAT_END    9
++/*
++ * ...and a STICKY depth span (D-064). PD_DLTAG_DEPTH below is consumed by one
++ * rectangle, which is right for a light glare (artifact.c draws one rect per
++ * glare) and wrong for the CROSSHAIR, which sight.c draws as a dozen
++ * gDPHudRectangle calls. Between these two markers the depth tag is not
++ * consumed, so one trace's answer covers every piece of the reticle.
++ */
++#define PD_DLSPAN_DEPTH_BEGIN 10
++#define PD_DLSPAN_DEPTH_END   11
  
- /**
-@@ -2005,6 +2006,11 @@
-     switch (payload) {
-         case PD_DLSPAN_FLAT_BEGIN: pd_stereo.flat_span = 1; break;
-         case PD_DLSPAN_FLAT_END:   pd_stereo.flat_span = 0; break;
-+        // D-064: hold the depth tag across every rectangle of the crosshair,
-+        // instead of the one-rect lifetime a light glare wants.
-+        case PD_DLSPAN_DEPTH_BEGIN: pd_stereo.depth_span = 1; break;
-+        case PD_DLSPAN_DEPTH_END:   pd_stereo.depth_span = 0;
-+                                    pd_stereo.depth_tag = 0.0f; break;
-         case PD_DLCLASS_SKY:       pd_stereo.pending_class = PD_DLCLASS_SKY; break;
-         case PD_DLCLASS_GUN:       pd_stereo.pending_class = PD_DLCLASS_GUN; break;
-         default:                   pd_stereo.pending_class = PD_DLCLASS_WORLD; break;
-@@ -2018,6 +2024,7 @@
-     pd_stereo.flat_span = 0;
-     pd_stereo.bg_scale = 1.0f;
-     pd_stereo.depth_tag = 0.0f;
-+    pd_stereo.depth_span = 0;
-     pd_stereo.world_a = 0.0f;
-     pd_stereo.near_k = 0.0f;
-     pd_stereo_mul_p = 0;
-@@ -3869,7 +3876,9 @@
-     // glare lands on its fixture in both eyes.
-     if (pd_stereo.depth_tag > 0.0f) {
-         const float d = pd_stereo.depth_tag;
--        pd_stereo.depth_tag = 0.0f;   // one tag, one rectangle
-+        if (!pd_stereo.depth_span) {
-+            pd_stereo.depth_tag = 0.0f;   // one tag, one rectangle (a glare)
-+        }
-         float eSigned = 0.0f, conv = 0.0f, gunConv = 0.0f;
-         if (pdVisionStereoFold(&eSigned, &conv, &gunConv) && eSigned != 0.0f &&
-             conv > 0.0f && pd_stereo.world_a != 0.0f) {
+ /*
+  * Two payloads that carry a NUMBER rather than a class (D-060). The class

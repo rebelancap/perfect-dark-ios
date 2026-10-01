@@ -42,8 +42,18 @@ fi
 FAILED=()
 for p in "${PATCHES[@]}"; do
   name="$(basename "$p")"
-  if patch -d "$DEST" -p1 --fuzz=0 --no-backup-if-mismatch < "$p" > "$DEST/.patch.log" 2>&1; then
+  # --forward: a patch whose hunks are already in the tree must FAIL, not be
+  # reverse-applied. Without it BSD patch answers its own "Reversed (or
+  # previously applied) patch detected! Assume -R? [y]" with yes, removes the
+  # change and exits 0 — the 0036 trap of the 245eca04c bump (docs/build.md).
+  if patch -d "$DEST" -p1 --fuzz=0 --forward --no-backup-if-mismatch < "$p" > "$DEST/.patch.log" 2>&1; then
     printf '  ok   %s\n' "$name"
+    # PD_OVERLAY_SHOW_OFFSETS=1 prints every hunk that did not land at the line
+    # the patch names — the wrong-place audit (0018 landed 110 lines early in
+    # the same bump and still said ok). --fuzz=0 checks context, not position.
+    if [ "${PD_OVERLAY_SHOW_OFFSETS:-0}" = "1" ]; then
+      grep -E '^(patching file|Hunk #)' "$DEST/.patch.log" | sed 's/^/         /' || true
+    fi
   else
     printf '  FAIL %s\n' "$name"
     sed 's/^/       /' "$DEST/.patch.log"

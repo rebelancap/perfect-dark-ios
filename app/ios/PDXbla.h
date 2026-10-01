@@ -40,7 +40,7 @@ typedef NS_ENUM(NSInteger, PDXblaKind) {
 @interface PDXblaFind : NSObject
 @property (nonatomic) PDXblaKind kind;
 @property (nonatomic, copy, nullable) NSString *path;          // absolute
-@property (nonatomic, copy, nullable) NSString *relativePath;  // under xbla/
+@property (nonatomic, copy, nullable) NSString *relativePath;  // under added-content/ (or the legacy xbla/)
 @property (nonatomic) unsigned long long bytes;
 @property (nonatomic, readonly) BOOL found;
 /** One line naming what was found, for a label. */
@@ -62,7 +62,7 @@ typedef NS_ENUM(NSInteger, PDXblaKind) {
 + (void)showPreparingNote:(NSString *)text;
 + (void)hidePreparingNote;
 
-/** Documents/xbla, created if it is not there. The engine makes it too. */
+/** Documents/added-content, created if it is not there. The engine makes it too (fs.c). */
 + (NSString *)dropDir;
 
 /** Caches/xbla — where patch 0009 routes the engine's cache/ to. */
