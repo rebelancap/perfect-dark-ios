@@ -16,9 +16,13 @@
 #import "PDDefaults.h"
 #import "PDPacing.h"
 #import "PDTouchOverlay.h"
+#import "PDGeometry.h"
 #import "PDXbla.h"
 #import "PDAudio.h"
 #import "PDWatchdog.h"
+#if TARGET_OS_VISION
+#import "PDVision3D.h"   // the 3D rows (D-082); vision3d/ is on this target's path only
+#endif
 
 #include "build_stamp.h"
 
@@ -53,6 +57,10 @@ typedef NS_ENUM(NSInteger, PDRowKind) {
 // one, and it is a multiplier everywhere else in the app - the engine reads it
 // as a gain - so the percentage is presentation, not storage.
 @property (nonatomic) BOOL percent;
+// A switch that only means something when this says so (D-081: GoldenEye
+// XBLA's switch, with no release added). Greyed, not hidden, so the section
+// does not change shape under the player when a file arrives.
+@property (nonatomic, copy, nullable) BOOL (^enabledWhen)(void);
 @end
 @implementation PDRow @end
 
@@ -203,6 +211,8 @@ static CFTimeInterval sPresentStarted;
 - (void)segChanged:(UISegmentedControl *)seg;
 + (void)logOpenLatency;
 + (nullable PDSettingsViewController *)presentedControllerEvenIfHidden;
++ (nullable PDSettingsViewController *)activeController;
+- (UIViewController *)topPresenter;
 @end
 
 @implementation PDSettingsViewController {
@@ -231,7 +241,13 @@ static CFTimeInterval sPresentStarted;
 	}
 	sWindow.hidden = NO;
 	[sWindow makeKeyAndVisible];
+	// The GoldenEye rows read a cached scan; refresh it OFF the main thread and
+	// redraw when it lands, so the page opens at once and still ends up true.
+	[PDXbla warmGoldenEyeScan:^{
+		[[self presentedControllerEvenIfHidden].tableView reloadData];
+	}];
 	PDLifecycle("settings PRESENT (%s)", reused ? "reused" : "built here");
+	pdGeoCheckpoint("settings present");
 	NSLog(@"perfectdark: [settings] presented %@ frame=%@",
 		reused ? @"(reused)" : @"(built here)", NSStringFromCGRect(sWindow.frame));
 	[self logOpenLatency];
@@ -273,13 +289,27 @@ static CFTimeInterval sPresentStarted;
 	if (sWindow) {
 		return;
 	}
+#if TARGET_OS_VISION
+	// PLAIN on visionOS (D-082): the 3D section's "3D Settings | Reset" header
+	// has to float while you scroll inside it, which only a plain table does.
+	PDSettingsViewController *vc = [[PDSettingsViewController alloc] initWithStyle:UITableViewStylePlain];
+#else
 	PDSettingsViewController *vc = [[PDSettingsViewController alloc] initWithStyle:UITableViewStyleInsetGrouped];
+#endif
 	UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
 
 	// Its own window: SDL owns the root view controller of the game's window,
 	// and presenting over it fights SDL's own view controller for orientation.
-	UIWindowScene *scene = nil;
-	for (UIScene *s in UIApplication.sharedApplication.connectedScenes) {
+	//
+	// The GAME window's scene first. "The first foreground-active scene" was
+	// the only rule until D-082, and on visionOS it is the wrong one whenever
+	// the prewarm (frame 600) lands while 3D is up: the active scene is then
+	// the immersive space's or the sheet's, the page is built there at
+	// 1366x1024, and every later in-window gear tap "presents" a page nobody
+	// can see (measured: settings_page=1, nothing on screen). On iOS there is
+	// one scene and this is the same answer as before.
+	UIWindowScene *scene = ((__bridge UIView *)pdAngleGetHostView()).window.windowScene;
+	for (UIScene *s in (scene ? @[] : UIApplication.sharedApplication.connectedScenes.allObjects)) {
 		if ([s isKindOfClass:UIWindowScene.class] && s.activationState == UISceneActivationStateForegroundActive) {
 			scene = (UIWindowScene *)s;
 			break;
@@ -365,6 +395,11 @@ static CFTimeInterval sPresentStarted;
 		game ? "game window" : "NOTHING", (int)PDDefaultsPacingIsDeferred());
 	NSLog(@"perfectdark: [settings] dismissed (key -> %@)", game ? @"game window" : @"NOTHING");
 
+	// Key status has just been handed back to SDL's window: the moment its
+	// size chain is checked and, if UIKit laid it out portrait while the page
+	// (or the Files picker over it) was up, put back (D-077).
+	pdGeoCheckpoint("settings dismiss");
+
 	PDTouchOverlay *v = PDTouchOverlay.current;
 	[v reassertTouchability];
 	// The layers under an opaque full-screen window may not have been
@@ -424,6 +459,28 @@ static CFTimeInterval sPresentStarted;
 		[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
 		                                              target:self action:@selector(done)];
 	[self buildRows];
+#if TARGET_OS_VISION
+	// D-082, openQ4's D-106: one plain table, the iOS sections and then the 3D
+	// rows as its last section. iOS 15 put a gap above every plain header that
+	// reads as a hole in a dark page; it goes.
+	self.tableView.sectionHeaderTopPadding = 0.0;
+	_rows3d = [[PDVision3DRows alloc] initWithTableView:self.tableView];
+#endif
+}
+
+/**
+ * What a picker, importer or alert this page opens is presented FROM: the top of
+ * this page's own presentation chain. Not sWindow's — on visionOS the same page
+ * also lives in the SwiftUI settings sheet (D-082), and an alert presented from
+ * the hidden 2D window would never be seen.
+ */
+- (UIViewController *)topPresenter
+{
+	UIViewController *top = self.navigationController ?: self;
+	while (top.presentedViewController) {
+		top = top.presentedViewController;
+	}
+	return top;
 }
 
 - (void)viewDidAppear:(BOOL)animated
@@ -441,7 +498,23 @@ static CFTimeInterval sPresentStarted;
 	// Since round R the controller outlives a dismiss (D-041), so "it exists"
 	// is no longer the same question as "it is on screen" — and `settings row`
 	// pressing a row on a page nobody can see is not a check of anything.
-	return sWindow.hidden ? nil : [self presentedControllerEvenIfHidden];
+	if (sWindow && !sWindow.hidden) {
+		return [self presentedControllerEvenIfHidden];
+	}
+#if TARGET_OS_VISION
+	// The same page in the SwiftUI settings sheet (D-082), so `settings row` and
+	// `settings seg` press the iOS rows there too when it is the one up.
+	if (pdVision3dSettingsSheetUp() && PDVisionSettingsViewController.current) {
+		return PDVisionSettingsViewController.current;
+	}
+#endif
+	return nil;
+}
+
+/** The page the player is looking at, or the 2D one if none is. Main thread. */
++ (nullable PDSettingsViewController *)activeController
+{
+	return [self presentedController] ?: [self presentedControllerEvenIfHidden];
 }
 
 + (nullable PDSettingsViewController *)presentedControllerEvenIfHidden
@@ -485,6 +558,14 @@ static CFTimeInterval sPresentStarted;
 		}
 		NSIndexPath *ip = [NSIndexPath indexPathForRow:index inSection:(NSInteger)i];
 		UITableViewCell *cell = [vc.tableView cellForRowAtIndexPath:ip];
+		if (!cell) {
+			// Off screen, so there is no control to move: bring the row in first
+			// (D-082 — the visionOS page is long enough for this to happen).
+			[vc.tableView scrollToRowAtIndexPath:ip atScrollPosition:UITableViewScrollPositionMiddle
+			                            animated:NO];
+			[vc.tableView layoutIfNeeded];
+			cell = [vc.tableView cellForRowAtIndexPath:ip];
+		}
 		UISegmentedControl *sc = (UISegmentedControl *)cell.accessoryView;
 		if (![sc isKindOfClass:UISegmentedControl.class]) {
 			return nil;
@@ -528,6 +609,11 @@ static CFTimeInterval sPresentStarted;
 		PDSettingsViewController *vc = [self presentedControllerEvenIfHidden];
 		[vc buildRows];
 		[vc.tableView reloadData];
+#if TARGET_OS_VISION
+		PDSettingsViewController *sheet = PDVisionSettingsViewController.current;
+		[sheet buildRows];
+		[sheet.tableView reloadData];
+#endif
 	});
 }
 
@@ -537,6 +623,9 @@ static CFTimeInterval sPresentStarted;
 		// Even if hidden: the page outlives a dismiss now (D-041), and a default
 		// changed while it is closed has to be on the row when it comes back.
 		[[self presentedControllerEvenIfHidden].tableView reloadData];
+#if TARGET_OS_VISION
+		[PDVisionSettingsViewController.current.tableView reloadData];
+#endif
 	});
 }
 
@@ -552,12 +641,28 @@ static CFTimeInterval sPresentStarted;
 
 - (void)scrollTo:(NSString *)needle
 {
+	[self scrollToSection:needle row:0];
+}
+
+- (void)scrollToSection:(NSString *)needle row:(NSInteger)row
+{
 	// The page may have been presented microseconds ago and not laid out yet,
 	// in which case the table has no geometry to scroll and the request is
 	// silently dropped (it was: `settings xbla` screenshotted the Aiming
 	// section). Force the layout first.
 	[self.view layoutIfNeeded];
 	[self.tableView layoutIfNeeded];
+#if TARGET_OS_VISION
+	if ([needle caseInsensitiveCompare:@"3d"] == NSOrderedSame) {
+		const NSInteger s3 = (NSInteger)_sections.count;
+		const NSInteger r = MAX(0, MIN(row, _rows3d.count - 1));
+		[self.tableView scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:r inSection:s3]
+		                      atScrollPosition:UITableViewScrollPositionTop animated:NO];
+		NSLog(@"perfectdark: [settings] scrolled to the 3D section, row %ld offset=%@ content=%@", (long)r,
+			NSStringFromCGPoint(self.tableView.contentOffset), NSStringFromCGSize(self.tableView.contentSize));
+		return;
+	}
+#endif
 	for (NSUInteger i = 0; i < _sections.count; i++) {
 		if ([_sections[i] rangeOfString:needle options:NSCaseInsensitiveSearch].location == NSNotFound) {
 			continue;
@@ -570,10 +675,13 @@ static CFTimeInterval sPresentStarted;
 			[self.tableView scrollRectToVisible:[self.tableView rectForHeaderInSection:(NSInteger)i]
 			                           animated:NO];
 		} else {
-			[self.tableView scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:(NSInteger)i]
+			const NSInteger r = MAX(0, MIN(row, (NSInteger)_rows[i].count - 1));
+			[self.tableView scrollToRowAtIndexPath:[NSIndexPath indexPathForRow:r inSection:(NSInteger)i]
 			                      atScrollPosition:UITableViewScrollPositionTop animated:NO];
 		}
-		NSLog(@"perfectdark: [settings] scrolled to section %lu (%@)", (unsigned long)i, _sections[i]);
+		NSLog(@"perfectdark: [settings] scrolled to section %lu (%@) offset=%@ content=%@",
+			(unsigned long)i, _sections[i], NSStringFromCGPoint(self.tableView.contentOffset),
+			NSStringFromCGSize(self.tableView.contentSize));
 		return;
 	}
 	NSLog(@"perfectdark: [settings] no section matching %@", needle);
@@ -598,7 +706,7 @@ static CFTimeInterval sPresentStarted;
 	__weak typeof(self) weakSelf = self;
 
 	_sections = @[ @"Aiming", @"Controls", @"Display", @"Audio",
-	               @"Xbox 360 (XBLA)", @"Texture packs", @"Diagnostics" ];
+	               @"Xbox 360 (XBLA)", @"GoldenEye 007 (GE Plus)", @"Texture packs", @"Diagnostics" ];
 	_rows = @[
 		@[
 			// bean's names, and his 0.30 - the 0.20 seed was the family's
@@ -688,11 +796,7 @@ static CFTimeInterval sPresentStarted;
 				// The bar belongs to the navigation controller, not the picker:
 				// without this its title drew black on the dark sheet.
 				nav.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
-				UIViewController *top = sWindow.rootViewController;
-				while (top.presentedViewController) {
-					top = top.presentedViewController;
-				}
-				[top presentViewController:nav animated:YES completion:nil];
+				[[weakSelf topPresenter] presentViewController:nav animated:YES completion:nil];
 			}),
 			pdPercentSliderRow(@"Volume", PDDefAudioMasterVolume),
 			pdSwitchRow(@"Mute", PDDefAudioMute),
@@ -722,15 +826,38 @@ static CFTimeInterval sPresentStarted;
 					(f.kind == PDXblaPackage || PDXbla.isUnpacked) ? @", ready" : @", not unpacked yet"];
 			}),
 			pdButtonRow(@"Add or replace the package…", ^{
-				UIViewController *top = sWindow.rootViewController;
-				while (top.presentedViewController) {
-					top = top.presentedViewController;
-				}
-				[PDXbla presentImporterFrom:top done:^(PDXblaFind *f) {
+				[PDXbla presentImporterFrom:[weakSelf topPresenter] done:^(PDXblaFind *f) {
 					NSLog(@"perfectdark: [settings] xbla now: %@", f.headline);
 					[PDShell.shared enqueue:^{ xblaImportRedetect(); }];
 					[weakSelf.tableView reloadData];
 				}];
+			}),
+		],
+		@[
+			// GE Plus (D-072): one status row and one add/replace row per file,
+			// and (D-081) one switch for the GoldenEye XBLA release. All are
+			// read at startup, so the switch takes effect at the next launch;
+			// the HD look ALSO rides the Xbox 360 switch above, as F6 does.
+			pdInfoRow(@"GoldenEye 007 ROM", ^NSString *{
+				PDGoldenEyeFind *f = [PDXbla cachedGoldenEye:PDGoldenEyeRom];
+				return f ? f.rowText : @"checking…";
+			}),
+			pdButtonRow(@"Add or replace the GoldenEye 007 ROM…", ^{
+				[weakSelf importGoldenEye:PDGoldenEyeRom];
+			}),
+			pdInfoRow(@"GoldenEye XBLA", ^NSString *{
+				PDGoldenEyeFind *f = [PDXbla cachedGoldenEye:PDGoldenEyeXbla];
+				return f ? f.rowText : @"checking…";
+			}),
+			({
+				PDRow *r = pdSwitchRow(@"GoldenEye XBLA textures and models", PDDefXblaGoldenEye);
+				r.enabledWhen = ^BOOL {
+					return [PDXbla cachedGoldenEye:PDGoldenEyeXbla].found;
+				};
+				r;
+			}),
+			pdButtonRow(@"Add or replace GoldenEye XBLA…", ^{
+				[weakSelf importGoldenEye:PDGoldenEyeXbla];
 			}),
 		],
 		@[
@@ -763,6 +890,104 @@ static CFTimeInterval sPresentStarted;
 		],
 	];
 }
+
+/**
+ * The GoldenEye rows' Files picker, and what to tell the player afterwards.
+ * Main thread.
+ */
+- (void)importGoldenEye:(PDGoldenEyeKind)kind
+{
+	[PDXbla presentGoldenEyeImporter:kind from:[self topPresenter] done:[PDSettingsViewController goldenEyeDone]];
+}
+
+/** The picker's completion: an alert in plain words, and the rows redrawn. */
++ (void (^)(NSString *, NSString *))goldenEyeDone
+{
+	return ^(NSString *title, NSString *message) {
+		PDSettingsViewController *vc = [PDSettingsViewController activeController];
+		[vc.tableView reloadData];
+		if (!title) {
+			NSLog(@"perfectdark: [geplus] picker cancelled");
+			return;
+		}
+		NSLog(@"perfectdark: [geplus] alert \"%@\": %@", title, message);
+		UIAlertController *a = [UIAlertController alertControllerWithTitle:title message:message
+		                                                    preferredStyle:UIAlertControllerStyleAlert];
+		[a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+		UIViewController *top = [vc topPresenter];
+		if (!top) {
+			return;
+		}
+		if ([top isKindOfClass:UIAlertController.class]) {
+			// an earlier answer still up: this one replaces it
+			UIViewController *under = top.presentingViewController;
+			[under dismissViewControllerAnimated:NO completion:^{
+				[under presentViewController:a animated:YES completion:nil];
+			}];
+			return;
+		}
+		[top presentViewController:a animated:YES completion:nil];
+	};
+}
+
++ (void)goldenEyePicked:(NSInteger)kind url:(NSURL *)url
+{
+	if (!NSThread.isMainThread) {
+		dispatch_async(dispatch_get_main_queue(), ^{ [self goldenEyePicked:kind url:url]; });
+		return;
+	}
+	[PDXbla adoptGoldenEye:(PDGoldenEyeKind)kind pickedURL:url done:[self goldenEyeDone]];
+}
+
+/**
+ * The GoldenEye rows say where they are, so a screenshot's claim about the
+ * layout has the view's own numbers behind it.
+ */
+- (void)tableView:(UITableView *)tv willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)ip
+{
+	if ((NSUInteger)ip.section < _sections.count && [_sections[(NSUInteger)ip.section] hasPrefix:@"GoldenEye"]) {
+		NSLog(@"perfectdark: [geplus] row %ld \"%@\" = \"%@\" frame=%@ in window=%@",
+			(long)ip.row, cell.textLabel.text, cell.detailTextLabel.text ?: @"",
+			NSStringFromCGRect(cell.frame),
+			NSStringFromCGRect([cell convertRect:cell.bounds toView:nil]));
+	}
+#if TARGET_OS_VISION
+	dispatch_async(dispatch_get_main_queue(), ^{ [self hideControlsUnderFloatingHeaders]; });
+#endif
+}
+
+#if TARGET_OS_VISION
+/**
+ * visionOS draws a cell's UISlider / UISwitch OVER a plain table's floating
+ * header, however opaque the header and whatever its zPosition (first sim run
+ * of D-082: a slider's end showed beside the 3D header's Reset pill). The
+ * labels go under it correctly; only the controls leak. So a control whose row
+ * has slid under its section's pinned header is faded out until it comes back.
+ */
+- (void)hideControlsUnderFloatingHeaders
+{
+	UITableView *tv = self.tableView;
+	const CGFloat top = tv.contentOffset.y + tv.adjustedContentInset.top;
+	for (NSIndexPath *ip in tv.indexPathsForVisibleRows) {
+		UITableViewCell *cell = [tv cellForRowAtIndexPath:ip];
+		if (!cell.accessoryView) {
+			continue;
+		}
+		const CGRect hr = [tv rectForHeaderInSection:ip.section];
+		const CGRect sr = [tv rectForSection:ip.section];
+		CGFloat pinned = MAX(top, hr.origin.y);
+		pinned = MIN(pinned, CGRectGetMaxY(sr) - hr.size.height);
+		const CGFloat headerBottom = pinned + hr.size.height;
+		const CGFloat controlTop = cell.frame.origin.y + cell.accessoryView.frame.origin.y;
+		cell.accessoryView.alpha = (controlTop < headerBottom - 1.0) ? 0.0 : 1.0;
+	}
+}
+
+- (void)scrollViewDidScroll:(UIScrollView *)sv
+{
+	[self hideControlsUnderFloatingHeaders];
+}
+#endif
 
 /** Any row changed: write the defaults through and re-apply at a frame boundary. */
 - (void)commit
@@ -802,8 +1027,65 @@ static CFTimeInterval sPresentStarted;
 
 // --- table -----------------------------------------------------------------
 
+#if TARGET_OS_VISION
+// D-082. The page on visionOS is the iOS sections, then ONE more: the 3D rows
+// (PDVision3DRows), at index _sections.count. Everything below that indexes
+// _sections or _rows checks for it first.
+- (BOOL)is3DSection:(NSInteger)s { return s == (NSInteger)_sections.count; }
+
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tv { return (NSInteger)_sections.count + 1; }
+- (NSString *)tableView:(UITableView *)tv titleForHeaderInSection:(NSInteger)s
+{
+	return [self is3DSection:s] ? nil : _sections[(NSUInteger)s];
+}
+
+/**
+ * Every header is a VIEW on visionOS, and an opaque one: a plain table floats
+ * the current section's header over its rows (openQ4 D-106,
+ * openq4_ios_settings.m:1313-1342), and the default plain header is see-through.
+ * The 3D section's is "3D Settings | Reset". Heights answered explicitly, or a
+ * custom header is compressed (vkQuake's first trap).
+ */
+- (CGFloat)tableView:(UITableView *)tv heightForHeaderInSection:(NSInteger)s
+{
+	return [self is3DSection:s] ? PDVision3DRows.headerHeight : 44.0;
+}
+
+- (UIView *)tableView:(UITableView *)tv viewForHeaderInSection:(NSInteger)s
+{
+	if ([self is3DSection:s]) {
+		return [_rows3d headerViewForWidth:tv.bounds.size.width];
+	}
+	UIView *hv = [[UIView alloc] initWithFrame:CGRectMake(0, 0, tv.bounds.size.width, 44)];
+	hv.backgroundColor = [UIColor colorWithWhite:0.06 alpha:1.0];
+	UILabel *l = [UILabel new];
+	l.text = _sections[(NSUInteger)s];
+	l.font = [UIFont systemFontOfSize:20 weight:UIFontWeightSemibold];
+	l.textColor = UIColor.whiteColor;
+	l.translatesAutoresizingMaskIntoConstraints = NO;
+	[hv addSubview:l];
+	[NSLayoutConstraint activateConstraints:@[
+		[l.leadingAnchor constraintEqualToAnchor:hv.leadingAnchor constant:20],
+		[l.bottomAnchor constraintEqualToAnchor:hv.bottomAnchor constant:-8],
+	]];
+	return hv;
+}
+
+/**
+ * A plain table floats its FOOTERS too — a five-line paragraph pinned over the
+ * bottom of the page. So on visionOS a section's footer text is its last ROW
+ * instead (a note row, after every real row, so `settings row <section> <n>`
+ * indices are unchanged), and the table has no footers.
+ */
+- (BOOL)isNoteRow:(NSIndexPath *)ip
+{
+	return ![self is3DSection:ip.section]
+	    && ip.row >= (NSInteger)_rows[(NSUInteger)ip.section].count;
+}
+#else
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tv { return (NSInteger)_sections.count; }
 - (NSString *)tableView:(UITableView *)tv titleForHeaderInSection:(NSInteger)s { return _sections[(NSUInteger)s]; }
+#endif
 
 /**
  * D-019: the whole-release switch is not symmetrical, and the footer says so.
@@ -824,11 +1106,24 @@ static CFTimeInterval sPresentStarted;
  */
 - (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)s
 {
+#if TARGET_OS_VISION
+	return nil;   // footers are note rows here (see -isNoteRow:)
+#else
+	return [self footerTextForSection:s];
+#endif
+}
+
+- (nullable NSString *)footerTextForSection:(NSInteger)s
+{
+	if ((NSUInteger)s >= _sections.count) {
+		return nil;
+	}
 	if ([_sections[(NSUInteger)s] isEqualToString:@"Controls"]) {
 		return @"Dual analogue is the port's own control style (\"Port/Ext\"): the stick walks and "
 		        "runs at the speed you push it, and dragging looks. N64 puts the stick back on the "
 		        "four C directions, which is on or off with no speed in between. "
-		        "In a menu, tap an item to choose it and drag up or down to scroll. "
+		        "In a menu, tap an item to choose it, drag up or down to scroll (a drag never "
+		        "chooses), and tap left or right of the menu to go to the previous or next one. "
 		        "Double-tap the left of the screen to roll that way, the middle of it to roll "
 		        "the other.";
 	}
@@ -842,17 +1137,54 @@ static CFTimeInterval sPresentStarted;
 	}
 	if ([_sections[(NSUInteger)s] isEqualToString:@"Xbox 360 (XBLA)"]) {
 		return @"One switch for the whole release — 4J's textures, models, rooms, font and "
-		        "explosions together, the same thing F6 does on a desktop. "
+		        "explosions together, the same thing F6 does on a desktop. It also switches "
+		        "GoldenEye's HD look in GE Plus while the GoldenEye XBLA switch below is on. "
 		        "Turning the release off changes the picture straight away. Turning it back on "
 		        "takes effect from the next level you load — the level you are standing in "
 		        "keeps the art it loaded with.";
 	}
+	if ([_sections[(NSUInteger)s] isEqualToString:@"GoldenEye 007 (GE Plus)"]) {
+		return @"Optional. With your own GoldenEye 007 (US) N64 ROM, GoldenEye's missions and "
+		        "arenas become playable here: choose GE Plus in the Perfect Menu. Add the GoldenEye "
+		        "XBLA release too and GE Plus uses its HD art — as its .7z or .zip, or as the Xbox 360 "
+		        "package (on its own, or in a .7z or .zip). Both go in the "
+		        "added-content folder under any name — with these rows, or with the Files app. "
+		        "Turn GoldenEye XBLA off to play GE Plus in GoldenEye's original N64 look; the "
+		        "file stays where it is. Perfect Dark's own Xbox 360 switch is not affected. "
+		        "Changes here take effect the next time you open the app.";
+	}
 	return nil;
 }
-- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)s { return (NSInteger)_rows[(NSUInteger)s].count; }
+- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)s
+{
+#if TARGET_OS_VISION
+	if ([self is3DSection:s]) {
+		return _rows3d.count;
+	}
+	return (NSInteger)_rows[(NSUInteger)s].count + ([self footerTextForSection:s] ? 1 : 0);
+#else
+	return (NSInteger)_rows[(NSUInteger)s].count;
+#endif
+}
 
 - (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip
 {
+#if TARGET_OS_VISION
+	if ([self is3DSection:ip.section]) {
+		return [_rows3d cellForRow:ip.row];
+	}
+	if ([self isNoteRow:ip]) {
+		UITableViewCell *note = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault
+		                                               reuseIdentifier:nil];
+		note.textLabel.text = [self footerTextForSection:ip.section];
+		note.textLabel.font = [UIFont systemFontOfSize:13];
+		note.textLabel.textColor = [UIColor colorWithWhite:0.55 alpha:1.0];
+		note.textLabel.numberOfLines = 0;
+		note.selectionStyle = UITableViewCellSelectionStyleNone;
+		note.userInteractionEnabled = NO;
+		return note;
+	}
+#endif
 	PDRow *row = _rows[(NSUInteger)ip.section][(NSUInteger)ip.row];
 	UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:nil];
 	cell.textLabel.text = row.title;
@@ -862,6 +1194,10 @@ static CFTimeInterval sPresentStarted;
 	case PDRowSwitch: {
 		UISwitch *sw = [UISwitch new];
 		sw.on = PDDefBool(row.key);
+		if (row.enabledWhen && !row.enabledWhen()) {
+			sw.enabled = NO;
+			cell.textLabel.textColor = UIColor.secondaryLabelColor;
+		}
 		objc_setAssociatedObject(sw, @selector(commit), row, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 		[sw addTarget:self action:@selector(switchChanged:) forControlEvents:UIControlEventValueChanged];
 		cell.accessoryView = sw;
@@ -911,6 +1247,16 @@ static CFTimeInterval sPresentStarted;
 
 - (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip
 {
+#if TARGET_OS_VISION
+	if ([self is3DSection:ip.section]) {
+		[tv deselectRowAtIndexPath:ip animated:YES];
+		[_rows3d didSelectRow:ip.row];
+		return;
+	}
+	if ([self isNoteRow:ip]) {
+		return;
+	}
+#endif
 	PDRow *row = _rows[(NSUInteger)ip.section][(NSUInteger)ip.row];
 	[tv deselectRowAtIndexPath:ip animated:YES];
 	if (row.kind == PDRowButton && row.action) {
@@ -923,6 +1269,12 @@ static CFTimeInterval sPresentStarted;
 	PDRow *row = objc_getAssociatedObject(sw, @selector(commit));
 	[NSUserDefaults.standardUserDefaults setBool:sw.on forKey:row.key];
 	[self commit];
+#if TARGET_OS_VISION
+	// Show FPS and the 3D section's FPS on Panel are one key on one page.
+	if ([row.key isEqualToString:PDDefShowFPS]) {
+		[PDVision3DRows reloadAll];
+	}
+#endif
 }
 
 - (void)sliderChanged:(UISlider *)sl

@@ -134,8 +134,11 @@ python3 -c 'import PIL' 2>/dev/null || fail "python3 Pillow is needed for the pi
 # There is ONE Vision Pro. If another session has it, this run must not fight
 # for it: a second app in the foreground backgrounds the first mid-test.
 BOOTED="$(xcrun simctl list devices booted | grep -c "$SIM" || true)"
-if [ "$BOOTED" != "0" ]; then
-	echo "NOTE: $SIM is already booted — assuming it is ours (a previous --keep run)."
+# Refuse, never assume (2026-10-03: this gate took the device out from under an
+# openQ4 round that had booted it between our preflight and our launch). A
+# previous --keep run of OURS is re-entered with PD_VISION_REUSE=1.
+if [ "$BOOTED" != "0" ] && [ "${PD_VISION_REUSE:-0}" != "1" ]; then
+	fail "$SIM is already booted by someone else — wait for it to shut down, or PD_VISION_REUSE=1 if the --keep run was yours"
 fi
 
 if pgrep -fl 'Developer/usr/bin/xcodebuild|cmake --build|ninja -C' >/dev/null 2>&1; then
@@ -458,10 +461,10 @@ W="$(get points | cut -dx -f1)"
 H="$(get points | cut -dx -f2)"
 [ -n "$W" ] && [ -n "$H" ] || fail "no points size in state"
 
-# FIRE at unit 0.8609, 0.7548 of the FULL view (PDTouchOverlay.m kButtons —
+# FIRE at unit 0.8609, 0.7240 of the FULL view (PDTouchOverlay.m kButtons —
 # bean's tuned table, D-032); the hit radius is the drawn radius x 1.25.
 FIRE_X=$(python3 -c "print(int(0.8609*$W))")
-FIRE_Y=$(python3 -c "print(int(0.7548*$H))")
+FIRE_Y=$(python3 -c "print(int(0.7240*$H))")
 HIT="$(bridge_retry "tap $FIRE_X $FIRE_Y")"
 echo "  tap $FIRE_X,$FIRE_Y -> $HIT"
 case "$HIT" in

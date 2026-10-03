@@ -30,17 +30,28 @@ so every other platform is byte for byte upstream's.
    minutes on the user's Air). It IS the stutter he reported. The cushion is laid
    once now, and re-laid only after the queue has actually reached zero (D-035).
 
+4. A hitch handled as a discontinuity (D-078). The engine renders a whole
+   hitch's audio in one frame when it catches up (diffframe60 ticks at once),
+   and the old +/-10 % loop chased that burst for 10-15 s with its integrator
+   wound to the clamp: the user heard every stutter as seconds of high, fast
+   sound. Now the loop's authority is 1 % (a stored 10 is clamped), it works on
+   a filtered level with its integrator frozen outside the working band, an
+   underrun re-primes once with a fade-in, and a burst is faded out and dropped
+   back to the setpoint in one step. A per-push trace ring (`audio trace` on the
+   bridge) records queue, ratio, integrator and every resync.
+
 diff --git a/port/src/audio.c b/port/src/audio.c
-index 791b5f8ab..1872f1415 100644
+index 791b5f8..63ed859 100644
 --- a/port/src/audio.c
 +++ b/port/src/audio.c
-@@ -15,6 +15,292 @@ static s32 bufferSize = 512;
+@@ -15,6 +15,408 @@ static s32 bufferSize = 512;
  static s32 queueLimit = 8192;
  static s32 sampleRate = 22020;
  
 +#ifdef PLATFORM_IOS
 +#include <stdlib.h>
 +#include <math.h>
++#include <string.h>
 +
 +/**
 + * The iOS shell's master volume / mute / other-app duck, as one gain.
@@ -93,6 +104,41 @@ index 791b5f8ab..1872f1415 100644
 +/** The converged output/input ratio x 10000, so 10350 is +3.5%. */
 +s32 g_PdAudioRateMilli = 10000;
 +
++/**
++ * The per-push trace (D-078): one row per audioEndFrame() push, in a ring the
++ * bridge's `audio trace` dumps to a file. Off until asked for; when on it costs
++ * one counter read and five stores a push. The stall measurements in
++ * MEASUREMENTS.md are this table.
++ */
++struct pdaudiotrace {
++	u64 us;          /* SDL performance counter, in microseconds */
++	s32 queued;      /* queue level before this push, samples */
++	s32 outSamples;  /* samples handed over by this push (0: dropped) */
++	s32 rateMilli;   /* the resample ratio after this push's update, x 10000 */
++	s32 integ;       /* the integrator x 1e6 */
++	s32 flags;       /* 1 underrun, 2 dropped, 4 resync re-prime, 8 resync drop-in, 16 fade in, 32 fade out */
++};
++#define PD_AUDIO_TRACE_LEN 16384
++struct pdaudiotrace g_PdAudioTrace[PD_AUDIO_TRACE_LEN];
++u32 g_PdAudioTraceCount = 0;
++s32 g_PdAudioTraceOn = 0;
++
++static void audioIosTrace(s32 queued, s32 out, float integ, s32 flags)
++{
++	struct pdaudiotrace *t;
++	if (!g_PdAudioTraceOn) {
++		return;
++	}
++	t = &g_PdAudioTrace[g_PdAudioTraceCount % PD_AUDIO_TRACE_LEN];
++	t->us = (u64)((double)SDL_GetPerformanceCounter() * 1000000.0 / (double)SDL_GetPerformanceFrequency());
++	t->queued = queued;
++	t->outSamples = out;
++	t->rateMilli = g_PdAudioRateMilli;
++	t->integ = (s32)lrintf(integ * 1000000.0f);
++	t->flags = flags;
++	g_PdAudioTraceCount++;
++}
++
 +static s16 *gainBuf = NULL;
 +static u32 gainBufSize = 0;
 +
@@ -144,31 +190,69 @@ index 791b5f8ab..1872f1415 100644
 +
 +/**
 + * Audio.RateMatchMaxPct - how far the loop is allowed to stretch or shrink a
-+ * frame, as a percentage.
++ * frame, as a percentage. **1, and 1 is also the ceiling** (D-078).
 + *
-+ * 10 is three times the authority the phone needs (3.5 %, M-036) and is a
-+ * CEILING rather than a working point: a sustained 10 % would be 1.6 semitones
-+ * of pitch, where the 3.5 % the loop actually settles on is 0.6 of one and is
-+ * constant, which is the difference between "nobody notices" and "that is not
-+ * the right note". It exists as a config key because the SIMULATOR's audio
-+ * clock runs about 16 % fast (M-030) and saturates the loop, which makes a
-+ * working controller look broken; raising it there is how the loop was shown to
-+ * close at all before a build was spent on the phone.
++ * The loop's only job is the clock mismatch between the engine's production
++ * (368 samples per 60 Hz tick, i.e. 0.27 % over 22020) and the device's
++ * consumption. Measured once the engine's own governor stopped fighting it
++ * (M-041): the phone settles within +/-0.1 % of neutral. One percent is ten
++ * times that and is about a sixth of a semitone - the most the loop may ever
++ * bend the sound.
++ *
++ * It used to be 10, and that was the stutter-then-chipmunk fault: a hitch
++ * empties the queue, the engine then renders the whole hitch's audio in one
++ * frame (diffframe60 is the hitch's length in ticks), the queue jumps to 8-16k
++ * samples, and the integrator wound to the 10 % clamp and spent 10-15 s
++ * playing everything 1.6 semitones high and fast while it drained (M-050). A
++ * hitch is a discontinuity, not a clock drift, and is now handled as one
++ * (audioEndFrame: re-prime after an underrun, drop to the setpoint with a fade
++ * after a burst). A pd.ini written by an older build carries 10; it is clamped
++ * to this ceiling when read, with a log line, and saved back as 1.
 + */
-+static s32 rateMatchMaxPct = 10;
++static s32 rateMatchMaxPct = 1;
++#define PD_AUDIO_RATE_MAX_PCT 1
 +
 +/** The setpoint, in samples: one and a half device buffers. */
 +#define PD_AUDIO_SETPOINT (bufferSize + bufferSize / 2)
++/**
++ * Above this a push means a burst arrived (a hitch's catch-up): resync. Three
++ * device buffers over the setpoint (4608 samples, 209 ms): the simulator's
++ * audio unit sometimes pulls two buffers late and then two at once, which put
++ * an honest steady state at 3460 (M-050); a hitch of 200 ms or more lands well
++ * above it. Smaller hitches stay inside the loop's 1 % authority.
++ */
++#define PD_AUDIO_HIGHMARK (PD_AUDIO_SETPOINT + 3 * bufferSize)
++/**
++ * A drop ends at the first push that finds the queue at or below the setpoint;
++ * the few milliseconds of silence that bring it back up to exactly the
++ * setpoint go in at the faded junction, where the sound is already being cut.
++ */
++#define PD_AUDIO_RESUME (PD_AUDIO_SETPOINT)
++/** Inside setpoint +/- this the integrator learns; outside it is frozen. */
++#define PD_AUDIO_BAND (bufferSize)
++/** Length of the fade at a resync, in stereo frames (5.8 ms at 22020 Hz). */
++#define PD_AUDIO_FADE 128
 +
-+/* PI gains. Deliberately slow: the disturbance is a constant clock ratio, not a
-+ * transient, so the integrator does the work and the proportional term only has
-+ * to stop the queue running away while it converges. KI reaches 3.5 % in about
-+ * a second. */
-+#define PD_AUDIO_KP 0.02f
-+#define PD_AUDIO_KI 0.0005f
++/* PI gains on the FILTERED queue level (an exponential average over ~32
++ * pushes, half a second, so the one-device-buffer sawtooth of every pull is
++ * not fed back as a wobble in pitch). Normalised error 1.0 = one setpoint off.
++ * KP: 1024 samples off is 0.67 %. KI: learns a 0.3 % drift in ~15 s. */
++#define PD_AUDIO_KP 0.01f
++#define PD_AUDIO_KI 0.00002f
++#define PD_AUDIO_LEVEL_ALPHA (1.0f / 32.0f)
 +
 +static float rateStep = 1.0f;     /* input frames per output frame */
 +static float rateInteg = 0.0f;
++static float rateLevel = -1.0f;   /* filtered queue level; <0 = not yet seeded */
++static s32 rateDropping = 0;      /* a burst is being dropped back to the setpoint */
++static s16 *fadeBuf = NULL;
++static u32 fadeBufSize = 0;
++/** Resyncs (D-078): re-primes after an underrun, burst drops, samples dropped. */
++s32 g_PdAudioResyncUnder = 0;
++s32 g_PdAudioResyncOver = 0;
++s32 g_PdAudioDroppedSamples = 0;
++s32 g_PdAudioRateMinMilli = 10000;
++s32 g_PdAudioRateMaxMilli = 10000;
 +static float ratePhase = 0.0f;    /* fractional read position carried over */
 +static s16 ratePrev[2] = { 0, 0 };/* last input frame of the previous buffer */
 +static s16 *rateBuf = NULL;
@@ -180,7 +264,7 @@ index 791b5f8ab..1872f1415 100644
 +	return v < lo ? lo : (v > hi ? hi : v);
 +}
 +
-+/** One PI step, from the queue level this frame. */
++/** One PI step, from the queue level this push. */
 +static void audioIosRateUpdate(s32 queued)
 +{
 +	const float setpoint = (float)PD_AUDIO_SETPOINT;
@@ -189,12 +273,23 @@ index 791b5f8ab..1872f1415 100644
 +	if (setpoint <= 0.0f) {
 +		return;
 +	}
++	if (rateLevel < 0.0f) {
++		rateLevel = (float)queued;
++	} else {
++		rateLevel += ((float)queued - rateLevel) * PD_AUDIO_LEVEL_ALPHA;
++	}
 +	/* Positive when the queue is BELOW the setpoint, i.e. produce more. */
-+	err = pdClampf((setpoint - (float)queued) / setpoint, -1.0f, 1.0f);
++	err = pdClampf((setpoint - rateLevel) / setpoint, -1.0f, 1.0f);
 +
 +	{
 +		const float lim = (float)rateMatchMaxPct / 100.0f;
-+		rateInteg = pdClampf(rateInteg + PD_AUDIO_KI * err, -lim, lim);
++		/* Anti-windup: the integrator is the loop's estimate of the clock
++		 * mismatch and learns only while the queue is in its working band.
++		 * Outside it the queue is recovering from a discontinuity, which is
++		 * not drift and must not be remembered as drift. */
++		if (fabsf(rateLevel - setpoint) <= (float)PD_AUDIO_BAND) {
++			rateInteg = pdClampf(rateInteg + PD_AUDIO_KI * err, -lim, lim);
++		}
 +		adj = pdClampf(PD_AUDIO_KP * err + rateInteg, -lim, lim);
 +	}
 +
@@ -254,6 +349,37 @@ index 791b5f8ab..1872f1415 100644
 +
 +	*outLen = n * 4u;
 +	return rateBuf;
++}
++
++/**
++ * A copy of the frame's buffer with a short linear fade at its start (in) or
++ * end (out), so a resync joins silence or skipped audio without a click.
++ */
++static const s16 *audioIosFade(const s16 *buf, u32 len, s32 fadeIn)
++{
++	const u32 frames = len / 4u;
++	const u32 n = frames < PD_AUDIO_FADE ? frames : PD_AUDIO_FADE;
++	u32 i;
++
++	if (n == 0) {
++		return buf;
++	}
++	if (fadeBufSize < len) {
++		s16 *grown = (s16 *)realloc(fadeBuf, len);
++		if (!grown) {
++			return buf;
++		}
++		fadeBuf = grown;
++		fadeBufSize = len;
++	}
++	memcpy(fadeBuf, buf, len);
++	for (i = 0; i < n; i++) {
++		const float g = (float)i / (float)n;
++		const u32 f = fadeIn ? i : frames - 1 - i;
++		fadeBuf[f * 2 + 0] = (s16)lrintf((float)fadeBuf[f * 2 + 0] * g);
++		fadeBuf[f * 2 + 1] = (s16)lrintf((float)fadeBuf[f * 2 + 1] * g);
++	}
++	return fadeBuf;
 +}
 +
 +/** The frame's buffer with the shell's gain in it, or the buffer itself. */
@@ -327,7 +453,7 @@ index 791b5f8ab..1872f1415 100644
  s32 audioInit(void)
  {
  	if (SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) {
-@@ -22,6 +308,21 @@ s32 audioInit(void)
+@@ -22,6 +424,29 @@ s32 audioInit(void)
  		return -1;
  	}
  
@@ -344,12 +470,20 @@ index 791b5f8ab..1872f1415 100644
 +	if (queueLimit < 16384) {
 +		queueLimit = 16384;
 +	}
++	// The rate matcher's authority has a hard ceiling (D-078). A pd.ini from
++	// 1.0.1.1 or earlier carries 10, which is what let a hitch be heard as
++	// seconds of high, fast sound; it is clamped here and saved back as 1.
++	if (rateMatchMaxPct > PD_AUDIO_RATE_MAX_PCT) {
++		sysLogPrintf(LOG_NOTE, "audio: Audio.RateMatchMaxPct=%d is above the %d %% ceiling; using %d",
++			rateMatchMaxPct, PD_AUDIO_RATE_MAX_PCT, PD_AUDIO_RATE_MAX_PCT);
++		rateMatchMaxPct = PD_AUDIO_RATE_MAX_PCT;
++	}
 +#endif
 +
  	SDL_AudioSpec want, have;
  	SDL_zero(want);
  	want.freq = 22020; // TODO: this might cause trouble for some platforms
-@@ -38,10 +339,32 @@ s32 audioInit(void)
+@@ -38,10 +463,32 @@ s32 audioInit(void)
  		return -1;
  	}
  
@@ -382,7 +516,7 @@ index 791b5f8ab..1872f1415 100644
  	return 0;
  }
  
-@@ -69,12 +392,53 @@ void audioSetNextBuffer(const s16 *buf, u32 len)
+@@ -69,12 +516,114 @@ void audioSetNextBuffer(const s16 *buf, u32 len)
  void audioEndFrame(void)
  {
  	if (nextBuf && nextSize) {
@@ -404,24 +538,84 @@ index 791b5f8ab..1872f1415 100644
 +#endif
 +		if (queued < queueLimit) {
 +#ifdef PLATFORM_IOS
++			// Steady state: the queue is held at its setpoint by resampling the
++			// frame by at most 1 %, and nothing is inserted (D-039). A HITCH is
++			// different and is handled as the discontinuity it is (D-078):
++			//
++			//  - underrun: the device ran dry, the gap has already been heard.
++			//    Lay the cushion down again ONCE (D-035 allows a re-prime only
++			//    after the queue has really reached zero, which a healthy
++			//    session never does) and fade the frame in after it. The
++			//    integrator keeps its drift estimate; the level filter restarts.
++			//  - burst: the engine renders a hitch's worth of audio in one
++			//    frame when it catches up. Keep up to the high mark, fade the
++			//    last kept frame out, drop the rest until the queue is down to
++			//    the setpoint, top it up to exactly the setpoint with a few ms of
++			//    silence at the cut, fade back in. Latency returns in one step instead
++			//    of being pitch-chased for seconds.
++			const s32 setpoint = PD_AUDIO_SETPOINT;
++			const s32 inSamples = (s32)(nextSize / 4u);
++			s32 flags = 0;
++			s32 fade = 0;   /* 1 in, -1 out */
++
 +			if (g_PdAudioPushes == 0) {
 +				audioIosStartDevice();
++			} else if (queued == 0) {
++				flags |= 1 | 4;
++				g_PdAudioResyncUnder++;
++				g_PdAudioReprimes++;
++				audioIosQueueSilence(setpoint - inSamples);
++				rateLevel = (float)setpoint;
++				rateDropping = 0;
++				ratePrev[0] = ratePrev[1] = 0;
++				ratePhase = 0.0f;
++				fade = 1;
 +			}
-+			// No silence is ever inserted after the prime (D-039). The queue
-+			// is held at its setpoint by resampling the frame instead, which
-+			// is the only mitigation that does not make a gap out of the fix.
++
++			if (rateDropping) {
++				if (queued > PD_AUDIO_RESUME) {
++					g_PdAudioDroppedSamples += inSamples;
++					g_PdAudioPushes++;
++					audioIosTrace(queued, 0, rateInteg, 8);
++					nextBuf = NULL;
++					nextSize = 0;
++					return;
++				}
++				rateDropping = 0;
++				audioIosQueueSilence(setpoint - queued - inSamples);
++				rateLevel = (float)setpoint;
++				ratePrev[0] = ratePrev[1] = 0;
++				ratePhase = 0.0f;
++				fade = 1;
++			} else if (g_PdAudioPushes > 0 && queued + inSamples > PD_AUDIO_HIGHMARK) {
++				g_PdAudioResyncOver++;
++				rateDropping = 1;
++				fade = -1;
++			}
++
 +			{
 +				u32 outLen = nextSize;
 +				const s16 *out;
 +				audioIosRateUpdate(queued);
 +				out = audioIosRateConvert(nextBuf, nextSize, &outLen);
++				if (fade) {
++					out = audioIosFade(out, outLen, fade > 0);
++					flags |= fade > 0 ? 16 : 32;
++				}
 +				SDL_QueueAudio(dev, audioIosApplyGain(out, outLen), outLen);
 +				rateOutSamples = (s32)(outLen / 4u);
 +			}
 +			g_PdAudioPushes++;
-+			g_PdAudioPushSamples = (s32)(nextSize / 4u);
++			g_PdAudioPushSamples = inSamples;
 +			g_PdAudioOutSamples = rateOutSamples;
 +			g_PdAudioRateMilli = (s32)lrintf(10000.0f / rateStep);
++			if (g_PdAudioRateMilli < g_PdAudioRateMinMilli) {
++				g_PdAudioRateMinMilli = g_PdAudioRateMilli;
++			}
++			if (g_PdAudioRateMilli > g_PdAudioRateMaxMilli) {
++				g_PdAudioRateMaxMilli = g_PdAudioRateMilli;
++			}
++			audioIosTrace(queued, rateOutSamples, rateInteg, flags);
 +#else
  			SDL_QueueAudio(dev, nextBuf, nextSize);
 +#endif
@@ -432,18 +626,19 @@ index 791b5f8ab..1872f1415 100644
 +#ifdef PLATFORM_IOS
 +		else {
 +			g_PdAudioDrops++;
++			audioIosTrace(queued, 0, rateInteg, 2);
 +		}
 +#endif
  		nextBuf = NULL;
  		nextSize = 0;
  	}
-@@ -84,4 +448,9 @@ PD_CONSTRUCTOR static void audioConfigInit(void)
+@@ -84,4 +633,9 @@ PD_CONSTRUCTOR static void audioConfigInit(void)
  {
  	configRegisterInt("Audio.BufferSize", &bufferSize, 0, 1 * 1024 * 1024);
  	configRegisterInt("Audio.QueueLimit", &queueLimit, 0, 1 * 1024 * 1024);
 +#ifdef PLATFORM_IOS
 +	configRegisterInt("Audio.PrimeSamples", &primeSamples, 0, 32 * 1024);
 +	configRegisterInt("Audio.RateMatch", &rateMatch, 0, 1);
-+	configRegisterInt("Audio.RateMatchMaxPct", &rateMatchMaxPct, 1, 50);
++	configRegisterInt("Audio.RateMatchMaxPct", &rateMatchMaxPct, 0, PD_AUDIO_RATE_MAX_PCT);
 +#endif
  }

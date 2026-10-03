@@ -27,9 +27,10 @@
 //
 // 3. **In a menu the whole screen is a pointer** (D-023, overlay 0019). PD's
 //    menus take a mouse, and dialogChangeItemFocusWithMouse() walks the open
-//    dialog's own columns and rows. So a tap moves the highlight to the item
-//    under the finger and presses Accept, and a vertical drag feeds the wheel
-//    that scrolls a list longer than the dialog.
+//    dialog's own columns and rows. So the highlight follows the finger, a TAP
+//    clicks on the lift (D-083), and a vertical drag feeds the wheel - sized so
+//    the menu follows the finger - and never clicks at all. A tap beside the
+//    dialog is LEFT/RIGHT, and a tap on no item is nothing (overlay 0051).
 #import <GameController/GameController.h>
 
 #import "PDTouchOverlay.h"
@@ -37,6 +38,9 @@
 #import "PDShell.h"
 #import "PDDefaults.h"
 #import "PDSettingsViewController.h"
+
+// overlay 0051 — one menu line as a fraction of the screen's height (D-083).
+extern float menuIosRowFraction(void);
 
 // overlay 0021 — every paused state, not just an open menu dialog (D-037).
 // Declared here rather than in PDShell.h: that header belongs to another seam
@@ -139,11 +143,18 @@ static const CGFloat kStickZoneFrac   = 0.45;
 // a menu means "confirm" (D-014).
 static const CGFloat kTapSlopPoints   = 12.0;
 static const NSTimeInterval kTapMaxSeconds = 0.25;
-// Points of vertical drag per wheel tick in a menu. One tick is LINEHEIGHT in
-// menuUpdateScroll(), so this is "about one row per thumb-width".
-static const CGFloat kScrollPointsPerTick = 26.0;
+// A menu tap's click, in engine frames after the lift (D-083): one frame with
+// the button up to AIM (the highlight moves to the item under the lift point),
+// then two with it down - the first is the select (a Z_TRIG edge), the second
+// is what lets a slider take the tap's position (menuitemSliderTick() enters
+// its edit mode on the first and reads mouseheld on the next).
+static const int kMenuClickFrames = 3;
 // A chip's touch target is bean's: a quarter larger than the ring that is drawn.
 static const CGFloat kHitRadiusFactor = 1.25;
+// D-088 (Shipwright D-038): the eye badge's radius, and how a hidden chip
+// ghosts in the layout editor.
+static const CGFloat kHideBadgeRadius = 14.0;
+static const CGFloat kHiddenGhostAlpha = 0.22;
 
 // --- the double-tap roll (D-032) -------------------------------------------
 // Two taps in the stick region inside this window, within this distance of each
@@ -189,14 +200,26 @@ typedef struct {
 #define PD_CK_Y_NEXTWEAP 0x00000080u  // CK_Y  — "Next Weapon"
 #define PD_CK_ROLL       0x08000000u  // CK_0800 — Dab's "Combat Roll"
 #define PD_CK_CROUCH     0x80000000u  // CK_8000 — "Cycle Crouch"
+// D-085 (GitHub issue #1): the Xbox 360 pad's RB and LB. The port binds RB to
+// CK_LTRIG, "Fire Mode [LT]" = BUTTON_ALTMODE, the gun-function toggle
+// (bondmove.c bgunProcessInputAltButton), and LB to CK_DPAD_D, "Radial Menu
+// [DD]" = BUTTON_RADIAL, the active menu (input.c pcjoybinds, optionsmenu.c
+// menuBinds). Both are bits of the N64 pad word the shell already ORs in.
+#define PD_CK_ALTMODE    PDPadL       // CK_LTRIG — "Fire Mode", the secondary function
+#define PD_CK_RADIAL     PDPadDown    // CK_DPAD_D — "Radial Menu", the weapon wheel
 
 static const PDButtonSpec kButtons[] = {
-	{ "FIRE",   PDPadG,           "scope",                       0.8609, 0.7548, 46 },
+	// FIRE raised 0.7548 -> 0.7240 (D-085 addendum, the user, 2026-10-02: "raise the
+	// fire button a tiny bit to eliminate overlap") - the smallest lift that
+	// leaves ~4 pt between its ring and ALT's on the 17e (4.2) and the Air (4.9).
+	{ "FIRE",   PDPadG,           "scope",                       0.8609, 0.7240, 46 },
 	// AIM small on purpose (bean): it is a mode toggle, not a held-in-panic
 	// button, and only FIRE earns the big target.
 	{ "AIM",    PDPadR,           "target",                      0.9315, 0.5484, 28 },
-	{ "USE",    PDPadB,           "hand.raised.fill",            0.8030, 0.9278, 28 },
-	{ "CROUCH", PD_CK_CROUCH,     "arrow.down",                  0.9443, 0.9175, 28 },
+	// USE, ALT and CROUCH share one unitY (D-085 addendum: "horizontally
+	// parallel"). 0.9227 was ALT's, the middle of the three old values.
+	{ "USE",    PDPadB,           "hand.raised.fill",            0.8030, 0.9227, 28 },
+	{ "CROUCH", PD_CK_CROUCH,     "arrow.down",                  0.9443, 0.9227, 28 },
 	{ "RELOAD", PD_CK_X_RELOAD,   "arrow.triangle.2.circlepath", 0.8521, 0.5119, 28 },
 	// bean's SWAP is the 360 pad's Y, weapon swap. PD's Y is Next Weapon, which
 	// is the same thumb doing the same job.
@@ -204,6 +227,15 @@ static const PDButtonSpec kButtons[] = {
 	// The pause/START button, parked top-right away from the fight. The three-bar
 	// glyph, not a pause bar: the same button is START in the front-end menus.
 	{ "START",  PDPadStart,       "line.3.horizontal",           0.9400, 0.0992, 20 },
+	// D-085, the user's placements. ALT: on the USE-CROUCH line, half way between
+	// them. Hidden on a GoldenEye level while the gun in hand has no second
+	// function (every GoldenEye gun) - see -applyChipRules.
+	{ "ALT",    PD_CK_ALTMODE,    "switch.2",                    0.8737, 0.9227, 28 },
+	// WHEEL: centred between RELOAD and AIM, above them (one chip gap above
+	// RELOAD's ring). Hold-and-drag like AIM (D-046): press opens the active
+	// menu, the drag picks the slice, the lift chooses it. Glyph = vkQuake's
+	// wheel (ios_touch.m), the user's ask.
+	{ "WHEEL",  PD_CK_RADIAL,     "circle.hexagongrid.fill",     0.8918, 0.3720, 28 },
 };
 #define PD_NUM_BUTTONS ((int)(sizeof(kButtons) / sizeof(kButtons[0])))
 
@@ -232,6 +264,9 @@ static const PDButtonSpec kMenuButtons[] = {
 @property (nonatomic) CGFloat radius;
 @property (nonatomic, copy) NSString *label;
 @property (nonatomic) BOOL held;
+/** A toggle chip's ON state (D-087: ALT while the gun is on its secondary
+ *  function): a brighter ring and a faint fill, lighter than held. */
+@property (nonatomic) BOOL engaged;
 /** Draw at the editor's full-presence yellow instead of the playing look. */
 @property (nonatomic) BOOL editing;
 @end
@@ -320,6 +355,15 @@ static const PDButtonSpec kMenuButtons[] = {
 	[self restyle];
 }
 
+- (void)setEngaged:(BOOL)engaged
+{
+	if (_engaged == engaged) {
+		return;
+	}
+	_engaged = engaged;
+	[self restyle];
+}
+
 - (void)setEditing:(BOOL)editing
 {
 	_editing = editing;
@@ -337,9 +381,11 @@ static const PDButtonSpec kMenuButtons[] = {
 		_ring.fillColor = UIColor.clearColor.CGColor;
 	} else {
 		_ring.strokeColor =
-			[UIColor colorWithWhite:1.0 alpha:MIN(_alpha * (_held ? 2.0 : 1.0), 1.0) * _dim].CGColor;
+			[UIColor colorWithWhite:1.0 alpha:MIN(_alpha * ((_held || _engaged) ? 2.0 : 1.0), 1.0) * _dim].CGColor;
 		_ring.fillColor = _held
 			? [UIColor colorWithWhite:1.0 alpha:_alpha * 0.4 * _dim].CGColor
+			: _engaged
+			? [UIColor colorWithWhite:1.0 alpha:_alpha * 0.2 * _dim].CGColor
 			: UIColor.clearColor.CGColor;
 	}
 	[CATransaction commit];
@@ -381,12 +427,33 @@ static const PDButtonSpec kMenuButtons[] = {
 	CGPoint _aimDragLast;
 	BOOL _aimDragArmed;   // an AIM press is live (synthetic touches have no UITouch)
 
+	// The WEAPON WHEEL chip (D-085), hold-and-drag like AIM: the finger that
+	// pressed it is a stick whose origin is where it landed, fed to the LEFT
+	// stick the active menu reads (activemenutick.c, joyGetStickXOnSample) for
+	// as long as the chip is held, and to nothing else - no look, no move.
+	UITouch *_wheelTouch;
+	CGPoint _wheelOrigin;
+	CGVector _wheelStick;     // -1..1, screen axes, after the radial deadzone
+	BOOL _wheelArmed;
+	__weak PDTouchButtonView *_altChip;
+	__weak PDTouchButtonView *_wheelChip;
+
 	CGPoint _stickOrigin;
 	CGVector _stickValue;      // curved, -1…1
 	CGPoint _lookLast;
 	CGVector _lookLead;        // predicted-touch lead already applied
 	CGPoint _lookDownPoint;
 	NSTimeInterval _lookDownTime;
+
+	// D-086: a chip press the engine has not seen yet. A tap whose began and
+	// ended reach this layer between two publishes (UIKit delivers both in one
+	// pass when the system's edge-gesture gate held the touch back) would set
+	// and clear its bit before any frame read it. Such a lift is LATCHED: the
+	// bit goes out on the next publish and drops on the one after, so the engine
+	// sees one frame down and one frame up, exactly like a pad press.
+	unsigned _unpublishedMask;   // bits pressed since the last publish
+	unsigned _latchMask;         // bits lifted before any publish saw them
+	unsigned _latchedTaps;       // how many lifts were latched (state)
 
 	// The double-tap roll (D-032).
 	NSTimeInterval _lastStickTapTime;
@@ -414,6 +481,12 @@ static const PDButtonSpec kMenuButtons[] = {
 	CGPoint _pointerPublished;
 	CGFloat _scrollResidue;
 	int _pendingWheel;
+	// The click a lifted tap owes the engine (D-083), played out by -publish
+	// at a frozen point so a second finger cannot move it mid-click.
+	int _clickFrames;
+	CGPoint _clickPoint;
+	BOOL _clickQueued;
+	CGPoint _clickQueuedPoint;
 
 #if !TARGET_OS_VISION
 	// UIImpactFeedbackGenerator is unavailable on visionOS — the headset has no
@@ -427,6 +500,9 @@ static const PDButtonSpec kMenuButtons[] = {
 	// subviews receive nothing — which is exactly why there was no way to reach
 	// Settings in the headset, where a pad is usually paired (the user, 0.0.0.5).
 	UIButton *_gear;
+	// The corner-geometry log's change detector (D-076).
+	NSString *_lastGeo;
+	uint32_t _geoTicks;
 	CFTimeInterval _gameplaySince;
 	CGFloat _scale;
 
@@ -485,6 +561,15 @@ static const PDButtonSpec kMenuButtons[] = {
 	__weak PDTouchButtonView *_dragChip;
 	CGVector _dragGrab;                 // finger-to-centre offset at touch-down
 	CGPoint _dragUnit;                  // where the drag has got to, unit coords
+	CGPoint _dragStartUnit;             // ...and where it started (a tap is not a move)
+
+	// D-088 (Shipwright D-038): chips the player hid. The set is the cache of the
+	// `hidden` flags in the layout store, rebuilt with the other cached settings;
+	// the eye badge rides the SELECTED chip only (the last one touched).
+	NSMutableSet<NSString *> *_userHidden;
+	NSString *_editSelected;
+	UIView *_hideBadge;
+	UIImageView *_hideBadgeIcon;
 }
 
 /**
@@ -617,8 +702,8 @@ static __weak PDTouchOverlay *sCurrent;
 }
 
 /**
- * bean's gear (touch_overlay_uikit.mm:1598-1619): 34x34, top-LEFT of the safe
- * area at +12/+12, white at 0.55 on black at 0.30, a sibling of the overlay.
+ * bean's gear (touch_overlay_uikit.mm:1598-1619): 34x34, white at 0.55 on black
+ * at 0.30, a sibling of the overlay.
  */
 - (void)installGearInWindow:(UIWindow *)window
 {
@@ -630,16 +715,59 @@ static __weak PDTouchOverlay *sCurrent;
 	gear.translatesAutoresizingMaskIntoConstraints = NO;
 	[gear addTarget:self action:@selector(openSettings) forControlEvents:UIControlEventTouchUpInside];
 	[window addSubview:gear];
-	UILayoutGuide *safe = window.safeAreaLayoutGuide;
-	[NSLayoutConstraint activateConstraints:@[
-		[gear.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:12],
-		[gear.topAnchor constraintEqualToAnchor:safe.topAnchor constant:12],
-		[gear.widthAnchor constraintEqualToConstant:34],
-		[gear.heightAnchor constraintEqualToConstant:34],
-	]];
 	_gear = gear;
+	[self pinGearInWindow:window];
 	[window layoutIfNeeded];
 	NSLog(@"perfectdark: [touch] gear installed frame=%@", NSStringFromCGRect(gear.frame));
+}
+
+/**
+ * Where the gear sits (D-076).
+ *
+ * iPhone: PAUSE's default spot MIRRORED - the same unit y of the full window
+ * and 1 - its unit x - so the two are level and equally far in from their
+ * corners on every iPhone shape. It is derived from the START row of kButtons,
+ * the same numbers PAUSE's own default is drawn from, so it cannot drift from
+ * it. It used to hang off the window's safe area (+12/+12, bean), which put
+ * it level with nothing in particular - and since the UIScene adoption (D-038)
+ * SDL's window is born sceneless and grafted onto the scene, and a grafted
+ * window reports the PORTRAIT panel's insets while it is laid out landscape
+ * (top 47 / left 0 on a 17e in landscape): the gear dropped by the portrait
+ * top inset and slid to the edge. A player who moved PAUSE keeps their spot;
+ * the gear follows the default, so it stays where the player learned it.
+ *
+ * visionOS: unchanged, the safe area's top-left at +12/+12 - a window in the
+ * shared space has no insets and nothing grafted, and its corner is not
+ * shaped by a phone's bezel.
+ */
+- (void)pinGearInWindow:(UIWindow *)window
+{
+	UIButton *gear = _gear;
+	if (!gear || gear.superview != window) {
+		return;
+	}
+	NSMutableArray<NSLayoutConstraint *> *c = [NSMutableArray arrayWithObjects:
+		[gear.widthAnchor constraintEqualToConstant:34],
+		[gear.heightAnchor constraintEqualToConstant:34], nil];
+#if TARGET_OS_VISION
+	UILayoutGuide *safe = window.safeAreaLayoutGuide;
+	[c addObject:[gear.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:12]];
+	[c addObject:[gear.topAnchor constraintEqualToAnchor:safe.topAnchor constant:12]];
+#else
+	const PDButtonSpec *pause = [self specForLabel:@"START"];
+	NSAssert(pause, @"no START row in kButtons");
+	const CGFloat ux = pause ? 1.0 - pause->unitX : 0.06;
+	const CGFloat uy = pause ? pause->unitY : 0.0992;
+	// Multiples of the window's own trailing/bottom edges, i.e. of its width and
+	// height (its leading/top are 0) - the same `u * bounds` the chips use.
+	[c addObject:[NSLayoutConstraint constraintWithItem:gear attribute:NSLayoutAttributeCenterX
+		relatedBy:NSLayoutRelationEqual toItem:window attribute:NSLayoutAttributeTrailing
+		multiplier:ux constant:0]];
+	[c addObject:[NSLayoutConstraint constraintWithItem:gear attribute:NSLayoutAttributeCenterY
+		relatedBy:NSLayoutRelationEqual toItem:window attribute:NSLayoutAttributeBottom
+		multiplier:uy constant:0]];
+#endif
+	[NSLayoutConstraint activateConstraints:c];
 }
 
 - (void)openSettings
@@ -669,18 +797,88 @@ static CGPoint pdUnitForLabel(NSString *label, CGPoint def)
 	if (![x isKindOfClass:NSNumber.class] || ![y isKindOfClass:NSNumber.class]) {
 		return def;
 	}
-	// Clamped on the way IN as well as on the way out: a dictionary edited by
-	// hand, or carried from a device with a different safe area, must not be
-	// able to put a chip somewhere no finger can reach.
-	return CGPointMake(MIN(1.0, MAX(0.0, x.doubleValue)), MIN(1.0, MAX(0.0, y.doubleValue)));
+	// NOT clamped (D-089, the user: "get rid of those entirely ... a reset can
+	// always fix it"): the editor may park a chip's centre past an edge, so a
+	// saved unit can be below 0 or above 1 and must come back exactly as saved.
+	// Only a value that cannot be a position at all falls back to the table.
+	// (a hand-edited 1e308 would turn the centre into inf once scaled)
+	if (!isfinite(x.doubleValue) || !isfinite(y.doubleValue)
+	    || fabs(x.doubleValue) > 100.0 || fabs(y.doubleValue) > 100.0) {
+		return def;
+	}
+	return CGPointMake(x.doubleValue, y.doubleValue);
 }
 
 - (void)storeUnit:(CGPoint)u forLabel:(NSString *)label
 {
 	NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
 	NSMutableDictionary *all = [([d dictionaryForKey:PDDefButtonLayout] ?: @{}) mutableCopy];
-	all[label] = @{ @"x": @(u.x), @"y": @(u.y) };
+	NSMutableDictionary *entry = [NSMutableDictionary dictionary];
+	if ([all[label] isKindOfClass:NSDictionary.class]) {
+		[entry addEntriesFromDictionary:all[label]];   // keep its `hidden` flag (D-088)
+	}
+	entry[@"x"] = @(u.x);
+	entry[@"y"] = @(u.y);
+	all[label] = entry;
 	[d setObject:all forKey:PDDefButtonLayout];
+}
+
+/**
+ * D-088: may this chip be hidden? Not START - with no pad it is the only way to
+ * pause, and so to reach anything else. The gear and the move stick are not
+ * chips and never had a badge. Everything else may go (Shipwright D-038 keeps
+ * only its menu button; ours is START).
+ */
+static BOOL pdLabelHideable(NSString *label)
+{
+	return label.length && ![label isEqualToString:@"START"];
+}
+
+/** The hidden flags, read from the same store as the positions. */
+static NSMutableSet<NSString *> *pdHiddenLabels(void)
+{
+	NSMutableSet<NSString *> *out = [NSMutableSet set];
+	NSDictionary *all = [NSUserDefaults.standardUserDefaults dictionaryForKey:PDDefButtonLayout];
+	for (NSString *label in all) {
+		id entry = all[label];
+		if (![label isKindOfClass:NSString.class] || ![entry isKindOfClass:NSDictionary.class]) {
+			continue;
+		}
+		id h = ((NSDictionary *)entry)[@"hidden"];
+		if ([h respondsToSelector:@selector(boolValue)] && [h boolValue] && pdLabelHideable(label)) {
+			[out addObject:label];
+		}
+	}
+	return out;
+}
+
+/** Write one chip's hidden flag; a shown chip with no position loses its entry
+ *  altogether, so it keeps following the built-in table. */
+- (void)storeHidden:(BOOL)hidden forLabel:(NSString *)label
+{
+	NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+	NSMutableDictionary *all = [([d dictionaryForKey:PDDefButtonLayout] ?: @{}) mutableCopy];
+	NSMutableDictionary *entry = [NSMutableDictionary dictionary];
+	if ([all[label] isKindOfClass:NSDictionary.class]) {
+		[entry addEntriesFromDictionary:all[label]];
+	}
+	if (hidden) {
+		entry[@"hidden"] = @YES;
+	} else {
+		[entry removeObjectForKey:@"hidden"];
+	}
+	if (entry.count) {
+		all[label] = entry;
+	} else {
+		[all removeObjectForKey:label];
+	}
+	[d setObject:all forKey:PDDefButtonLayout];
+}
+
+/** Hidden by the player (D-088) - not the menu split or ALT's GoldenEye rule. */
+- (BOOL)userHid:(PDTouchButtonView *)b
+{
+	return b != nil && [_userHidden containsObject:b.label];
 }
 
 /** The spec a live chip was built from, by label. */
@@ -699,7 +897,7 @@ static CGPoint pdUnitForLabel(NSString *label, CGPoint def)
 	return [label isEqualToString:@(kLeftFire.label)] ? &kLeftFire : NULL;
 }
 
-/** Where a chip's centre goes, in points, clamped into the safe area. */
+/** Where a chip's centre goes, in points - wherever the player put it (D-089). */
 - (CGPoint)centreForLabel:(NSString *)label radius:(CGFloat)radius
 {
 	CGPoint def;
@@ -717,9 +915,9 @@ static CGPoint pdUnitForLabel(NSString *label, CGPoint def)
 	// already inside the usable area of a notched phone - it was exported from
 	// one - and clamping pulled CROUCH and SWAP a chip's width in from where he
 	// put them, which is not parity (measured on lane 3, hit tests reported
-	// "look" where those two chips should have been). The clamp lives where it
-	// belongs instead: on the editor's drop, so a player cannot park a chip
-	// under the notch.
+	// "look" where those two chips should have been). The editor's drop has no
+	// clamp either since D-089: the player may park a chip anywhere, under the
+	// notch or half off the panel, and Reset brings it back.
 	(void)radius;
 	CGPoint u = pdUnitForLabel(label, def);
 	CGSize sz = self.bounds.size;
@@ -729,7 +927,7 @@ static CGPoint pdUnitForLabel(NSString *label, CGPoint def)
 /** bean: the mirrored FIRE exists only while AIM is held. */
 - (BOOL)leftFireVisible
 {
-	return !_editing && !_menuOpen && (_buttonMask & PDPadR) != 0;
+	return !_editing && !_menuOpen && (_buttonMask & PDPadR) != 0 && ![self userHid:_leftFire];
 }
 
 /** The AIM chip, by its mask rather than its label (a custom layout moves the
@@ -755,6 +953,132 @@ static CGPoint pdUnitForLabel(NSString *label, CGPoint def)
 	_aimDragArmed = NO;
 }
 
+// --- a press the engine never saw (D-086) ----------------------------------
+// On by default; the bridge's `touch latch off` turns it off so the bug can be
+// shown on the same build (artifacts/sim/chips-fix/00-ALT-DIAGNOSIS.txt).
+static BOOL sTapLatch = YES;
+
++ (void)setTapLatchEnabled:(BOOL)on { sTapLatch = on; }
++ (BOOL)tapLatchEnabled { return sTapLatch; }
+
+/**
+ * A chip's finger came off: drop its bits, unless no publish has carried them
+ * yet - then they are latched for exactly one publish (D-086). Every LIFT goes
+ * through here (touchesEnded, the bridge's tap: latch:YES; touchesCancelled and
+ * the watchdog's dead touches: latch:NO, dropped at once); the
+ * paths that DROP a chip on purpose (the editor, a hidden layer, a chip being
+ * hidden) clear _buttonMask directly and are not presses.
+ */
+- (void)liftChip:(PDTouchButtonView *)b latch:(BOOL)latch
+{
+	b.held = NO;
+	_buttonMask &= ~b.mask;
+	const unsigned unseen = b.mask & _unpublishedMask;
+	if (!latch) {
+		// A CANCELLED touch (a system edge gesture took it, or the watchdog found
+		// it dead) is never a tap - the same rule as the menu pointer (D-083).
+		// Latching it would be one frame of FIRE (a shot), WHEEL or AIM nobody
+		// asked for (D-086 review).
+		_latchMask &= ~b.mask;
+		_unpublishedMask &= ~b.mask;
+		return;
+	}
+	if (unseen && sTapLatch) {
+		_latchMask |= unseen;
+		_latchedTaps++;
+		NSLog(@"perfectdark: [touch] %@ lifted before any frame saw it - latched for one frame (D-086, #%u)",
+			b.label, _latchedTaps);
+		if (_latchedTaps <= 20) {
+			[self noteWatchdog:[NSString stringWithFormat:@"LATCH %@(began+ended between two frames, #%u) ",
+				b.label, _latchedTaps]];
+		}
+	}
+}
+
+// --- the weapon wheel (D-085) ------------------------------------------------
+// Full deflection is this far from where the finger landed. The active menu
+// only reads a DIRECTION (a slice once |x| or |y| > 20 of 127, eight sectors at
+// tan 15 degrees, activemenutick.c), so the radius is how far a thumb travels
+// before a slice lights: 32 * 0.15 deadzone = 5 pt of jitter ignored, and the
+// slice is chosen ~7 pt out. 48 until the D-085 addendum (the user: "increase
+// weapon wheel sensitivity a bit").
+static const CGFloat kWheelRadius = 32.0;
+
+/** The WHEEL chip, by its bit (a custom layout moves the chip, never its bit). */
+- (BOOL)isWheelChip:(PDTouchButtonView *)b
+{
+	return b != nil && b != _leftFire && (b.mask & PD_CK_RADIAL) != 0;
+}
+
+- (void)moveWheelTo:(CGPoint)p
+{
+	CGVector raw = CGVectorMake((p.x - _wheelOrigin.x) / kWheelRadius,
+	                            (p.y - _wheelOrigin.y) / kWheelRadius);
+	const CGFloat mag = sqrt(raw.dx * raw.dx + raw.dy * raw.dy);
+	if (mag <= kStickDeadzone) {
+		_wheelStick = CGVectorMake(0, 0);
+		return;
+	}
+	// The family's radial deadzone, rescaled so it still reaches 1; linear past
+	// it - the menu wants a direction, not a curve.
+	const CGFloat unit = MIN(1.0, (mag - kStickDeadzone) / (1.0 - kStickDeadzone));
+	_wheelStick = CGVectorMake(raw.dx / mag * unit, raw.dy / mag * unit);
+}
+
+/** Drop the wheel's drag (the chip's own release is the mask bit). */
+- (void)clearWheel
+{
+	_wheelTouch = nil;
+	_wheelArmed = NO;
+	_wheelStick = CGVectorMake(0, 0);
+}
+
+/**
+ * Per-frame chip rules that depend on the ENGINE (D-085): the secondary-function
+ * chip is hidden on a GoldenEye level while the gun in hand has no second
+ * function - all of GoldenEye's guns (geguns.c strips the hosts' second
+ * functions, geslappers.c the fists') - and shown again the moment a gun that
+ * has one is drawn (Mod.GePlusPdGuns can list Perfect Dark's own guns in a GE
+ * Plus arena). Everywhere else it is always shown, like every other chip.
+ * Called from -refreshEngineChrome, after the menu split, on the game thread.
+ */
+- (void)applyChipRules
+{
+	PDTouchButtonView *alt = _altChip;
+	if (!alt || _editing) {
+		return;
+	}
+	// D-087: ALT shows which function the gun is on. A melee secondary (the
+	// Falcon 2 / DY357 PISTOL WHIP, the fists) draws NO sight in Perfect Dark
+	// (currentPlayerGetSight, g_ModSightMeleeNone), and the choice is kept per
+	// weapon across missions - an odd number of ALT taps left the user with no
+	// crosshair and nothing on screen saying why.
+	int gunfunc = 0;
+	const BOOL armed = playerIosGunState(&gunfunc) > 0;
+	alt.engaged = armed && gunfunc == 1;
+	const BOOL suppressed = playerIosOnGoldenEyeLevel() && !playerIosGunHasSecondary();
+	const BOOL hide = _menuOpen || suppressed || [self userHid:alt];
+	if (alt.hidden == hide) {
+		return;
+	}
+	alt.hidden = hide;
+	if (hide && alt.held) {
+		alt.held = NO;
+		_buttonMask &= ~alt.mask;
+		_latchMask &= ~alt.mask;
+		_unpublishedMask &= ~alt.mask;
+		for (UITouch *t in [[_buttonTouches keyEnumerator] allObjects]) {
+			if ([_buttonTouches objectForKey:t] == alt) {
+				[_buttonTouches removeObjectForKey:t];
+			}
+		}
+	}
+	if (!_menuOpen) {
+		NSLog(@"perfectdark: [touch] ALT chip %@ (GoldenEye level %d, gun has a second function %d, hidden by the player %d)",
+			hide ? @"hidden" : @"shown", playerIosOnGoldenEyeLevel(), playerIosGunHasSecondary(), (int)[self userHid:alt]);
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Layout editing — bean's bar (touch_overlay_uikit.mm:1006-1090)
 
@@ -776,6 +1100,7 @@ static CGPoint pdUnitForLabel(NSString *label, CGPoint def)
 	_stickTouch = nil;
 	_lookTouch = nil;
 	[self clearAimDrag];
+	[self clearWheel];
 	_stickValue = CGVectorMake(0, 0);
 	_pendingLookX = _pendingLookY = 0;
 	_rollFrames = 0;
@@ -790,6 +1115,7 @@ static CGPoint pdUnitForLabel(NSString *label, CGPoint def)
 	// whatever the setting says when the editor closes.
 	self.hidden = NO;
 	_gear.hidden = YES;
+	_editSelected = nil;   // no badge until a chip is touched (Shipwright D-038)
 
 	[self buildEditChrome];
 	[self applyEditChrome];
@@ -809,6 +1135,10 @@ static CGPoint pdUnitForLabel(NSString *label, CGPoint def)
 	_editBar = nil;
 	_editSlider = nil;
 	_editPct = nil;
+	_editSelected = nil;
+	[_hideBadge removeFromSuperview];
+	_hideBadge = nil;
+	_hideBadgeIcon = nil;
 	_gear.hidden = NO;
 	NSLog(@"perfectdark: [touch] layout editor closed");
 	// applySettings puts the opacity, the visibility rule and the menu/gameplay
@@ -821,7 +1151,7 @@ static CGPoint pdUnitForLabel(NSString *label, CGPoint def)
 {
 	[NSUserDefaults.standardUserDefaults setObject:@{} forKey:PDDefButtonLayout];
 	[NSUserDefaults.standardUserDefaults setFloat:1.0f forKey:PDDefButtonScale];
-	NSLog(@"perfectdark: [touch] layout reset to the built-in table at scale 1.0");
+	NSLog(@"perfectdark: [touch] layout reset to the built-in table at scale 1.0, every chip shown");
 	_editSlider.value = 1.0f;
 	[self applySettings];
 	[self updateScalePct];
@@ -918,9 +1248,11 @@ static CGPoint pdUnitForLabel(NSString *label, CGPoint def)
 	for (PDTouchButtonView *b in _buttons) {
 		b.hidden = NO;
 		b.editing = YES;
+		b.alpha = [self userHid:b] ? kHiddenGhostAlpha : 1.0;
 	}
 	_leftFire.hidden = NO;
 	_leftFire.editing = YES;
+	_leftFire.alpha = [self userHid:_leftFire] ? kHiddenGhostAlpha : 1.0;
 	for (PDTouchButtonView *b in _menuButtons) {
 		b.hidden = YES;
 	}
@@ -963,15 +1295,17 @@ static CGPoint pdUnitForLabel(NSString *label, CGPoint def)
 		return;
 	}
 	CGSize sz = self.bounds.size;
-	UIEdgeInsets safe = self.safeAreaInsets;
-	CGFloat cx = p.x + _dragGrab.dx;
-	CGFloat cy = p.y + _dragGrab.dy;
-	cx = MAX(safe.left + b.radius + 4, MIN(cx, sz.width - safe.right - b.radius - 4));
-	cy = MAX(safe.top + b.radius + 4, MIN(cy, sz.height - safe.bottom - b.radius - 4));
+	// No clamp of any kind (D-089, the user's rule): not the safe area, not the
+	// panel's edge, not another chip. The centre follows the finger, so a chip
+	// can sit at x = 0, on top of a default, or half off the bottom; Reset is
+	// the way back from anywhere.
+	const CGFloat cx = p.x + _dragGrab.dx;
+	const CGFloat cy = p.y + _dragGrab.dy;
 	b.center = CGPointMake(cx, cy);
 	if (sz.width > 0 && sz.height > 0) {
 		_dragUnit = CGPointMake(cx / sz.width, cy / sz.height);
 	}
+	[self placeHideBadge];
 }
 
 /** The finger lifted: the chip's new place becomes the stored one. */
@@ -981,10 +1315,198 @@ static CGPoint pdUnitForLabel(NSString *label, CGPoint def)
 	if (!b) {
 		return;
 	}
-	[self storeUnit:_dragUnit forLabel:b.label];
 	b.held = NO;
-	NSLog(@"perfectdark: [touch] %@ moved to unit %.3f,%.3f", b.label, _dragUnit.x, _dragUnit.y);
 	_dragChip = nil;
+	// A touch that only selected the chip (to reach its eye badge, D-088) is not
+	// a move: storing it would pin the chip where the table has it today and
+	// stop it following a later default (the editor saves only what was moved).
+	if (fabs(_dragUnit.x - _dragStartUnit.x) < 0.0005 && fabs(_dragUnit.y - _dragStartUnit.y) < 0.0005) {
+		return;
+	}
+	[self storeUnit:_dragUnit forLabel:b.label];
+	NSLog(@"perfectdark: [touch] %@ moved to unit %.3f,%.3f", b.label, _dragUnit.x, _dragUnit.y);
+}
+
+// ---------------------------------------------------------------------------
+// D-088: hide a chip from the layout editor - Shipwright's eye badge (D-038).
+//
+// The badge sits just OUTSIDE the selected chip's ring, pointing away from the
+// chips within 150 pt (so a tight cluster spreads its badges outward rather
+// than onto a neighbour) or, for a lone chip, toward the middle of the screen;
+// clamped on-screen. eye.slash.fill = tap to hide; eye.fill = tap to show. The
+// badge is hit-tested BEFORE the chip body, and the body stays the drag handle.
+
+- (CGPoint)hideBadgeCentreFor:(PDTouchButtonView *)chip
+{
+	const CGPoint c = chip.center;
+	// The whole view, not the safe area: since D-089 a chip may sit under the
+	// notch or past an edge, and its badge must still find a spot on the panel
+	// beside the chip's visible part rather than be pushed back into the ring.
+	CGRect bounds = self.bounds;
+	NSMutableArray<PDTouchButtonView *> *all = [_buttons mutableCopy];
+	if (_leftFire) {
+		[all addObject:_leftFire];
+	}
+	CGFloat sx = 0, sy = 0;
+	int n = 0;
+	for (PDTouchButtonView *o in all) {
+		const CGFloat d = hypot(o.center.x - c.x, o.center.y - c.y);
+		if (o != chip && d > 1.0 && d < 150.0) {
+			sx += o.center.x;
+			sy += o.center.y;
+			n++;
+		}
+	}
+	CGFloat dx, dy;
+	if (n > 0) {
+		dx = c.x - sx / n;
+		dy = c.y - sy / n;
+		const CGFloat len = hypot(dx, dy);
+		if (len < 1.0) {
+			dx = 0; dy = -1;
+		} else {
+			dx /= len; dy /= len;
+		}
+	} else {
+		dx = c.x > CGRectGetMidX(bounds) ? -0.7071 : 0.7071;
+		dy = c.y > CGRectGetMidY(bounds) ? -0.7071 : 0.7071;
+	}
+	const CGFloat off = chip.radius + kHideBadgeRadius - 2.0;   // inner edge ~tangent to the ring
+	const CGFloat m = kHideBadgeRadius + 4.0;
+	const CGRect inner = CGRectInset(bounds, m, m);
+	// Shipwright clamps the preferred spot on-screen. Our right-hand chips sit
+	// at the edge, where the clamp slid the badge back INTO the ring (SWAP, lane
+	// 3) - the body would toggle instead of drag. So walk round the ring from the
+	// preferred direction, 15 degrees either way at a time, and take the first
+	// on-screen spot clear of every other chip; in a cluster too tight for that
+	// (ALT between USE and CROUCH on the bottom edge) the on-screen spot that
+	// overlaps its neighbours least. Failing everything, the clamp.
+	const CGFloat a0 = atan2(dy, dx);
+	CGPoint best = CGPointZero;
+	CGFloat bestClear = -CGFLOAT_MAX;
+	for (int k = 0; k <= 24; k++) {
+		const CGFloat a = a0 + (k % 2 ? 1 : -1) * ((k + 1) / 2) * (M_PI / 12.0);
+		const CGPoint b = CGPointMake(c.x + cos(a) * off, c.y + sin(a) * off);
+		if (!CGRectContainsPoint(inner, b)) {
+			continue;
+		}
+		CGFloat clear = CGFLOAT_MAX;
+		for (PDTouchButtonView *o in all) {
+			if (o != chip) {
+				clear = MIN(clear, hypot(o.center.x - b.x, o.center.y - b.y) - (o.radius + kHideBadgeRadius));
+			}
+		}
+		if (clear >= 0) {
+			return b;
+		}
+		if (clear > bestClear + 0.5) {   // earlier (nearer the preferred side) wins ties
+			bestClear = clear;
+			best = b;
+		}
+	}
+	if (bestClear > -CGFLOAT_MAX) {
+		return best;
+	}
+	CGPoint b = CGPointMake(c.x + dx * off, c.y + dy * off);
+	b.x = MAX(CGRectGetMinX(inner), MIN(CGRectGetMaxX(inner), b.x));
+	b.y = MAX(CGRectGetMinY(inner), MIN(CGRectGetMaxY(inner), b.y));
+	return b;
+}
+
+- (nullable PDTouchButtonView *)editChipForLabel:(NSString *)label
+{
+	if (!label) {
+		return nil;
+	}
+	for (PDTouchButtonView *b in _buttons) {
+		if ([b.label isEqualToString:label]) {
+			return b;
+		}
+	}
+	return [_leftFire.label isEqualToString:label] ? _leftFire : nil;
+}
+
+/** Put the badge on the selected chip, or take it away. */
+- (void)placeHideBadge
+{
+	PDTouchButtonView *chip = _editing ? [self editChipForLabel:_editSelected] : nil;
+	if (!chip || !pdLabelHideable(chip.label)) {
+		_hideBadge.hidden = YES;
+		return;
+	}
+	if (!_hideBadge) {
+		const CGFloat r = kHideBadgeRadius;
+		UIView *v = [[UIView alloc] initWithFrame:CGRectMake(0, 0, r * 2, r * 2)];
+		v.userInteractionEnabled = NO;   // the layer hit-tests it itself, first
+		v.backgroundColor = [UIColor colorWithWhite:0.10 alpha:0.92];
+		v.layer.cornerRadius = r;
+		v.layer.borderWidth = 1.5;
+		v.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.85].CGColor;
+		UIImageView *icon = [[UIImageView alloc] initWithFrame:v.bounds];
+		icon.contentMode = UIViewContentModeCenter;
+		icon.tintColor = UIColor.whiteColor;
+		[v addSubview:icon];
+		[self addSubview:v];
+		_hideBadge = v;
+		_hideBadgeIcon = icon;
+	}
+	const BOOL hidden = [self userHid:chip];
+	_hideBadgeIcon.image = [UIImage systemImageNamed:hidden ? @"eye.fill" : @"eye.slash.fill"
+		withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:15
+		                                                                 weight:UIImageSymbolWeightSemibold]];
+	_hideBadge.center = [self hideBadgeCentreFor:chip];
+	_hideBadge.hidden = NO;
+	[self bringSubviewToFront:_hideBadge];
+	if (_editBar) {
+		[self bringSubviewToFront:_editBar];
+	}
+}
+
+- (void)toggleHiddenForChip:(PDTouchButtonView *)chip
+{
+	if (!chip || !pdLabelHideable(chip.label)) {
+		return;
+	}
+	const BOOL hide = ![self userHid:chip];
+	[self storeHidden:hide forLabel:chip.label];
+	_userHidden = pdHiddenLabels();
+	chip.alpha = hide ? kHiddenGhostAlpha : 1.0;
+	NSLog(@"perfectdark: [touch] %@ %@ by the player (D-088)", chip.label, hide ? @"hidden" : @"shown");
+	[self placeHideBadge];
+}
+
+/**
+ * A finger down in the editor: the selected chip's badge first (a toggle, no
+ * drag), then a chip body (select it - its badge appears - and start the drag).
+ * The real path for touchesBegan AND the bridge's `tap` in the editor.
+ */
+- (NSString *)editBeganAt:(CGPoint)p
+{
+	PDTouchButtonView *sel = [self editChipForLabel:_editSelected];
+	if (sel && _hideBadge && !_hideBadge.hidden
+			&& hypot(p.x - _hideBadge.center.x, p.y - _hideBadge.center.y) <= kHideBadgeRadius + 4.0) {
+		[self toggleHiddenForChip:sel];
+#if !TARGET_OS_VISION
+		[_haptics impactOccurred];
+#endif
+		return [NSString stringWithFormat:@"badge:%@ hidden=%d", sel.label, (int)[self userHid:sel]];
+	}
+	PDTouchButtonView *chip = [self editChipAtPoint:p];
+	if (!chip || _dragChip) {
+		return chip ? @"busy" : @"none";
+	}
+	_editSelected = chip.label;
+	_dragChip = chip;
+	_dragGrab = CGVectorMake(chip.center.x - p.x, chip.center.y - p.y);
+	_dragUnit = CGPointMake(chip.center.x / MAX(1.0, self.bounds.size.width),
+	                        chip.center.y / MAX(1.0, self.bounds.size.height));
+	_dragStartUnit = _dragUnit;
+	chip.held = YES;
+	[self placeHideBadge];
+#if !TARGET_OS_VISION
+	[_haptics impactOccurred];
+#endif
+	return [NSString stringWithFormat:@"select:%@ badge=%d", chip.label, (int)(_hideBadge && !_hideBadge.hidden)];
 }
 
 /**
@@ -1003,6 +1525,7 @@ static CGPoint pdUnitForLabel(NSString *label, CGPoint def)
 	_cLookInvert = PDDefBool(PDDefInvertY) ? -1.0 : 1.0;
 	_cDoubleTapRoll = PDDefBool(PDDefDoubleTapRoll);
 	_cControlStyle = PDDefInt(PDDefControlStyle);
+	_userHidden = pdHiddenLabels();
 }
 
 - (void)applySettings
@@ -1033,6 +1556,8 @@ static CGPoint pdUnitForLabel(NSString *label, CGPoint def)
 		                                                         scale:_scale alpha:alpha dim:1.0];
 		[self addSubview:b];
 		[_buttons addObject:b];
+		if ([b.label isEqualToString:@"ALT"]) { _altChip = b; }
+		if ([b.label isEqualToString:@"WHEEL"]) { _wheelChip = b; }
 	}
 	// Fainter: placeable and pressable, but temporary (bean).
 	_leftFire = [[PDTouchButtonView alloc] initWithSpec:&kLeftFire
@@ -1465,7 +1990,7 @@ static CGPoint pdUnitForLabel(NSString *label, CGPoint def)
 		[v removeFromSuperview];
 		[gear removeFromSuperview];
 		[win addSubview:v];
-		if (gear) { [win addSubview:gear]; }
+		if (gear) { [win addSubview:gear]; [v pinGearInWindow:win]; }
 		[out appendString:@"overlay and gear re-added to the window"];
 		break;
 	}
@@ -1529,6 +2054,14 @@ static CGPoint pdUnitForLabel(NSString *label, CGPoint def)
 		NSLog(@"perfectdark: [touch] gear %@ (%@)", hide ? @"hidden" : @"shown",
 			playing ? @"gameplay" : @"menu/title");
 	}
+	// The corner geometry, logged when it changes (checked twice a second).
+	if (++_geoTicks % 30 == 0) {
+		NSString *geo = [self cornerGeometryReport];
+		if (![geo isEqualToString:_lastGeo]) {
+			_lastGeo = geo;
+			NSLog(@"perfectdark: [touch] corner geometry\n%@", geo);
+		}
+	}
 }
 
 - (void)layoutSubviews
@@ -1553,6 +2086,9 @@ static CGPoint pdUnitForLabel(NSString *label, CGPoint def)
 	_stickKnob.path = [UIBezierPath bezierPathWithOvalInRect:
 		CGRectMake(-kStickKnobRadius, -kStickKnobRadius, kStickKnobRadius * 2, kStickKnobRadius * 2)].CGPath;
 	(void)sz;
+	if (_editing) {
+		[self placeHideBadge];
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -1570,6 +2106,9 @@ static CGPoint pdUnitForLabel(NSString *label, CGPoint def)
 		}
 	}
 	for (PDTouchButtonView *b in (_menuOpen ? _menuButtons : _buttons)) {
+		if (b.hidden) {
+			continue;   // the ALT chip on a GoldenEye level (D-085)
+		}
 		CGFloat dx = p.x - b.center.x, dy = p.y - b.center.y;
 		// bean's target: a quarter larger than the ring that is drawn. A
 		// fingertip is 40pt wide and the ring is the mark, not the target.
@@ -1587,6 +2126,7 @@ static CGPoint pdUnitForLabel(NSString *label, CGPoint def)
 	if (b) {
 		b.held = YES;
 		_buttonMask |= b.mask;
+		_unpublishedMask |= b.mask;
 		if (touch) {
 			[_buttonTouches setObject:b forKey:touch];
 		}
@@ -1598,6 +2138,15 @@ static CGPoint pdUnitForLabel(NSString *label, CGPoint def)
 			_aimDragTouch = touch;
 			_aimDragLast = p;
 		}
+		// The weapon wheel (D-085): the same, but the drag is a stick for the
+		// active menu rather than a look. The press is the menu's button, so
+		// the wheel opens on touch-down with the stick at rest.
+		if ([self isWheelChip:b] && !_wheelArmed) {
+			_wheelArmed = YES;
+			_wheelTouch = touch;
+			_wheelOrigin = p;
+			_wheelStick = CGVectorMake(0, 0);
+		}
 #if !TARGET_OS_VISION
 		[_haptics impactOccurred];
 #endif
@@ -1606,8 +2155,9 @@ static CGPoint pdUnitForLabel(NSString *label, CGPoint def)
 
 	if (_menuOpen) {
 		// The whole screen is the menu's pointer. Focus follows the finger
-		// through the engine's own dialogChangeItemFocusWithMouse(); a lift
-		// that did not travel is Accept.
+		// through the engine's own dialogChangeItemFocusWithMouse(); the
+		// button is NOT down while the finger is (D-083) - a lift that did not
+		// travel is the click, played out by -publish.
 		if (!_pointerTouch || !touch) {
 			_pointerTouch = touch;
 			_pointerPoint = p;
@@ -1805,13 +2355,17 @@ static CGVector pdStickCurve(CGVector raw)
 {
 	for (PDTouchButtonView *b in _buttons) {
 		if (b.held) { b.held = NO; _buttonMask &= ~b.mask; }
-		b.hidden = _menuOpen;
+		_latchMask &= ~b.mask; _unpublishedMask &= ~b.mask;   // D-086: a drop, not a tap
+		b.hidden = _menuOpen || [self userHid:b];   // D-088: hidden by the player
 	}
 	if (_leftFire.held) { _leftFire.held = NO; _buttonMask &= ~_leftFire.mask; }
+	_latchMask &= ~_leftFire.mask; _unpublishedMask &= ~_leftFire.mask;
 	_leftFire.hidden = YES;
 	[self clearAimDrag];
+	[self clearWheel];
 	for (PDTouchButtonView *b in _menuButtons) {
 		if (b.held) { b.held = NO; _buttonMask &= ~b.mask; }
+		_latchMask &= ~b.mask; _unpublishedMask &= ~b.mask;   // D-086: a drop, not a tap
 		b.hidden = !_menuOpen;
 	}
 	[self hideStickChrome];
@@ -1826,30 +2380,52 @@ static CGVector pdStickCurve(CGVector raw)
 	CGFloat dy = p.y - _pointerPoint.y;
 	_pointerPoint = p;
 
-	// Drag up = look further down the list, which is a wheel-down tick.
-	_scrollResidue -= dy;
-	while (_scrollResidue >= kScrollPointsPerTick) { _scrollResidue -= kScrollPointsPerTick; _pendingWheel += 1; }
-	while (_scrollResidue <= -kScrollPointsPerTick) { _scrollResidue += kScrollPointsPerTick; _pendingWheel -= 1; }
-
-	if (hypot(p.x - _pointerDownPoint.x, p.y - _pointerDownPoint.y) >= kTapSlopPoints) {
+	if (!_pointerScrolled) {
+		if (hypot(p.x - _pointerDownPoint.x, p.y - _pointerDownPoint.y) < kTapSlopPoints) {
+			// Still a tap: a fingertip's jitter scrolls nothing.
+			return;
+		}
+		// Now a drag, for the rest of this touch, and never a click. The travel
+		// so far counts, so the list does not lag the finger by the slop.
 		_pointerScrolled = YES;
+		dy = p.y - _pointerDownPoint.y;
 	}
+
+	// Drag up = look further down the list, which is a wheel-down tick. A tick
+	// is one LINEHEIGHT on screen (overlay 0051), so the menu moves with the
+	// finger rather than at a rate someone picked.
+	const CGFloat tick = MAX(4.0, self.bounds.size.height * menuIosRowFraction());
+	_scrollResidue -= dy;
+	while (_scrollResidue >= tick) { _scrollResidue -= tick; _pendingWheel += 1; }
+	while (_scrollResidue <= -tick) { _scrollResidue += tick; _pendingWheel -= 1; }
 }
 
 - (void)liftPointerAt:(CGPoint)p
 {
+	const BOOL tapped = !_pointerScrolled
+		&& hypot(p.x - _pointerDownPoint.x, p.y - _pointerDownPoint.y) < kTapSlopPoints;
 	_pointerPoint = p;
 	_pointerDown = NO;
 	_pointerTouch = nil;
 
-	// No synthetic Accept here, and that is a finding rather than an omission.
-	// VK_MOUSE_LEFT is bound to CK_ZTRIG by default (input.c:198) and menu.c
-	// treats Z_TRIG as select just as it treats A - so the pointer going DOWN
-	// already is the click, on the frame the highlight moves to the item under
-	// the finger. Pressing A on the lift as well made every tap select twice:
-	// typing an agent's name gave "Darkxzzll", two characters per tap, because
-	// the first select opened the keyboard and the second pressed the key the
-	// cursor was on. One tap, one select.
+	// The click is HERE, on the lift of a touch that did not travel (D-083).
+	// It used to be the finger going down: the button was held for as long as
+	// the finger was, so a drag chose the item it started on, and chose again
+	// on every frame a slow drag paused - a thumb trying to scroll the Perfect
+	// Menu ended up in a combat match. It is still the pointer's own button
+	// (VK_MOUSE_LEFT, CK_ZTRIG's bind), never a pressed A as well: that made
+	// every tap select twice ("Darkxzzll", D-022). One tap, one select.
+	if (tapped) {
+		if (_clickFrames > 0) {
+			// A second tap inside the first one's three frames: it waits its
+			// turn rather than moving the first click off its item.
+			_clickQueued = YES;
+			_clickQueuedPoint = p;
+		} else {
+			_clickFrames = kMenuClickFrames;
+			_clickPoint = p;
+		}
+	}
 	_pointerScrolled = NO;
 }
 
@@ -1869,17 +2445,8 @@ static CGVector pdStickCurve(CGVector raw)
 		// One chip at a time: a two-finger "drag two buttons at once" is not a
 		// thing anyone wants and doubles the state to get wrong.
 		for (UITouch *t in touches) {
-			CGPoint p = [t locationInView:self];
-			PDTouchButtonView *chip = [self editChipAtPoint:p];
-			if (chip && !_dragChip) {
-				_dragChip = chip;
-				_dragGrab = CGVectorMake(chip.center.x - p.x, chip.center.y - p.y);
-				_dragUnit = CGPointMake(chip.center.x / MAX(1.0, self.bounds.size.width),
-				                        chip.center.y / MAX(1.0, self.bounds.size.height));
-				chip.held = YES;
-#if !TARGET_OS_VISION
-				[_haptics impactOccurred];
-#endif
+			if (!_dragChip) {
+				[self editBeganAt:[t locationInView:self]];
 			}
 		}
 		return;
@@ -1902,6 +2469,10 @@ static CGVector pdStickCurve(CGVector raw)
 		}
 		if (t == _stickTouch) {
 			[self moveStickTo:[t locationInView:self]];
+			continue;
+		}
+		if (_wheelTouch && t == _wheelTouch) {
+			[self moveWheelTo:[t locationInView:self]];
 			continue;
 		}
 		if (_aimDragTouch && t == _aimDragTouch) {
@@ -1949,7 +2520,7 @@ static CGVector pdStickCurve(CGVector raw)
 	}
 }
 
-- (void)endTouches:(NSSet<UITouch *> *)touches
+- (void)endTouches:(NSSet<UITouch *> *)touches cancelled:(BOOL)cancelled
 {
 	if (_editing) {
 		if (_dragChip) {
@@ -1961,13 +2532,18 @@ static CGVector pdStickCurve(CGVector raw)
 	for (UITouch *t in touches) {
 		PDTouchButtonView *b = [_buttonTouches objectForKey:t];
 		if (b) {
-			b.held = NO;
-			_buttonMask &= ~b.mask;
+			[self liftChip:b latch:!cancelled];
 			[_buttonTouches removeObjectForKey:t];
 			// The lift leaves aim mode: PD's aim button is HOLD by default
 			// (AIMCONTROL_HOLD, bondmove.c:951), so dropping R is all it takes.
 			if ([self isAimChip:b] || (_aimDragTouch && t == _aimDragTouch)) {
 				[self clearAimDrag];
+			}
+			// The lift is the choice: the button and the stick go together, so
+			// the slice the engine highlighted last frame is the one amClose()
+			// applies (activemenutick.c closes before it reads this frame's).
+			if ([self isWheelChip:b] || (_wheelTouch && t == _wheelTouch)) {
+				[self clearWheel];
 			}
 			continue;
 		}
@@ -2000,8 +2576,16 @@ static CGVector pdStickCurve(CGVector raw)
 	}
 }
 
-- (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event { [self endTouches:touches]; }
-- (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event { [self endTouches:touches]; }
+- (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event { [self endTouches:touches cancelled:NO]; }
+- (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event
+{
+	// A cancelled menu touch (a system edge gesture took it) is never a tap:
+	// marked as travelled, so its lift does not click (D-083).
+	if (_pointerTouch && [touches containsObject:_pointerTouch]) {
+		_pointerScrolled = YES;
+	}
+	[self endTouches:touches cancelled:YES];
+}
 
 // ---------------------------------------------------------------------------
 // The engine side: once per frame, on the game thread.
@@ -2021,7 +2605,7 @@ static CGVector pdStickCurve(CGVector raw)
 		// Nothing here has to run while the settings page is up (bean's tick
 		// returns the same way), and whatever the player was holding must not
 		// stay held behind the page - that is walking into a wall under a sheet.
-		if (v->_buttonMask || v->_rollFrames || v->_stickTouch || v->_lookTouch
+		if (v->_buttonMask || v->_latchMask || v->_rollFrames || v->_stickTouch || v->_lookTouch
 			|| v->_stickValue.dx != 0 || v->_stickValue.dy != 0) {
 			[v releaseEverything];
 		}
@@ -2042,7 +2626,7 @@ static CGVector pdStickCurve(CGVector raw)
 		// held at the instant a controller connects - the overlay hides itself
 		// on that notification - was a full-speed walk the engine never stopped
 		// seeing and nothing on screen to explain it.
-		if (v && (v->_buttonMask || v->_stickTouch || v->_lookTouch
+		if (v && (v->_buttonMask || v->_latchMask || v->_stickTouch || v->_lookTouch
 				|| v->_stickValue.dx != 0.0 || v->_stickValue.dy != 0.0)) {
 			if (!v->_releasedWhileHidden) {
 				v->_releasedWhileHidden = YES;
@@ -2095,6 +2679,15 @@ static CGVector pdStickCurve(CGVector raw)
 	if (_menuOpen != wasMenuOpen && !_editing) {
 		[self applyMenuChrome];
 	}
+	// A finger still down when the dialog closes under it (a pad's B, a timer)
+	// would never be lifted - -liftPointerAt: only runs while a menu is open -
+	// and the next menu's touches would be refused as a second finger.
+	if (!_menuOpen && _pointerTouch) {
+		_pointerTouch = nil;
+		_pointerDown = NO;
+		_pointerScrolled = NO;
+	}
+	[self applyChipRules];
 	[self updateGearVisibility];
 }
 
@@ -2176,7 +2769,10 @@ static CGVector pdStickCurve(CGVector raw)
 	}
 	[_buttonTouches removeAllObjects];
 	[self clearAimDrag];
+	[self clearWheel];
 	_buttonMask = 0;
+	_unpublishedMask = 0;
+	_latchMask = 0;
 	if (!keepRoll) {
 		_rollFrames = 0;
 	}
@@ -2248,9 +2844,9 @@ static CGVector pdStickCurve(CGVector raw)
 		PDTouchButtonView *b = [_buttonTouches objectForKey:t];
 		PD_NOTE(b.label ?: @"chip", t);
 		if (b) {
-			b.held = NO;
-			_buttonMask &= ~b.mask;
+			[self liftChip:b latch:NO];   // a dead touch is not a tap
 			if ([self isAimChip:b]) { [self clearAimDrag]; }
+			if ([self isWheelChip:b]) { [self clearWheel]; }
 		}
 		[_buttonTouches removeObjectForKey:t];
 	}
@@ -2280,21 +2876,77 @@ static CGVector pdStickCurve(CGVector raw)
  */
 - (NSString *)heldReport
 {
+	return [[self heldLines] stringByAppendingString:[self cornerGeometryReport]];
+}
+
+- (NSString *)heldLines
+{
 	return [NSString stringWithFormat:
 		@"touch_sent_mask=0x%x\ntouch_sent_stick=%.2f,%.2f\n"
 		 "touch_mask=0x%x\ntouch_stick=%.2f,%.2f\ntouch_tracking=%d%d%d\ntouch_roll=%d\n"
 		 "touch_hidden=%d\ntouch_pad=%d\ntouch_menu=%d\ngear_hidden=%d\n"
 		 "touch_rollgesture=%d\ntouch_editing=%d\ntouch_aimdrag=%d\n"
+		 "touch_wheel=%d\ntouch_wheel_stick=%.2f,%.2f\ntouch_alt_hidden=%d\ntouch_alt_engaged=%d\n"
+		 "touch_user_hidden=%@\ntouch_edit_selected=%@\ntouch_hide_badge=%@\n"
+		 "touch_latch=%d\ntouch_latched_taps=%u\n"
 		 "pointer_valid=%d\npointer_down=%d\npointer_xy=%.1f,%.1f\n"
-		 "pointer_published=%.1f,%.1f\npointer_engine=%d\n",
+		 "pointer_published=%.1f,%.1f\npointer_engine=%d\npointer_click=%d\n",
 		_sentMask, _sentStick.dx, _sentStick.dy,
 		_buttonMask, _stickValue.dx, _stickValue.dy,
 		_stickTouch != nil, _lookTouch != nil, _pointerTouch != nil, _rollFrames,
 		(int)self.hidden, (int)self.padConnected, (int)_menuOpen,
 		_gear ? (int)_gear.hidden : -1,
 		(int)_cDoubleTapRoll, (int)_editing, (int)_aimDragArmed,
+		(int)_wheelArmed, _wheelStick.dx, _wheelStick.dy, _altChip ? (int)_altChip.hidden : -1,
+		_altChip ? (int)_altChip.engaged : -1,
+		_userHidden.count ? [[_userHidden.allObjects sortedArrayUsingSelector:@selector(compare:)]
+			componentsJoinedByString:@","] : @"-",
+		_editSelected ?: @"-",
+		(_hideBadge && !_hideBadge.hidden)
+			? [NSString stringWithFormat:@"%.0f,%.0f", _hideBadge.center.x, _hideBadge.center.y] : @"-",
+		(int)sTapLatch, _latchedTaps,
 		(int)_pointerValid, (int)_pointerDown, _pointerPoint.x, _pointerPoint.y,
-		_pointerPublished.x, _pointerPublished.y, (int)(inputIosPointerIsActive() != 0)];
+		_pointerPublished.x, _pointerPublished.y, (int)(inputIosPointerIsActive() != 0),
+		_clickFrames];
+}
+
+/** One chip by label, or nil. */
+- (nullable PDTouchButtonView *)chipForLabel:(NSString *)label
+{
+	for (PDTouchButtonView *b in [_buttons arrayByAddingObjectsFromArray:_menuButtons]) {
+		if ([b.label isEqualToString:label]) {
+			return b;
+		}
+	}
+	return nil;
+}
+
+/**
+ * The top-corner geometry in WINDOW coordinates: the gear, the START and BACK
+ * chips (which share START's default spot), and both safe areas. The views
+ * report their own frames - the instrument for "is the gear level with PAUSE"
+ * (D-076), as `state` rows and as a log line whenever it changes.
+ */
+- (NSString *)cornerGeometryReport
+{
+	UIWindow *win = self.window;
+	NSString *(^rect)(UIView *) = ^NSString *(UIView *v) {
+		if (!v || !v.superview) {
+			return @"none";
+		}
+		CGRect r = [v.superview convertRect:v.frame toView:nil];
+		return [NSString stringWithFormat:@"%.1f,%.1f,%.1f,%.1f cy=%.1f",
+			r.origin.x, r.origin.y, r.size.width, r.size.height, CGRectGetMidY(r)];
+	};
+	UIEdgeInsets ws = win ? win.safeAreaInsets : UIEdgeInsetsZero;
+	UIEdgeInsets os = self.safeAreaInsets;
+	return [NSString stringWithFormat:
+		@"geo_window=%.1fx%.1f\ngeo_window_safe=%.1f,%.1f,%.1f,%.1f\n"
+		 "geo_overlay=%@\ngeo_overlay_safe=%.1f,%.1f,%.1f,%.1f\n"
+		 "geo_gear=%@\ngeo_start=%@\ngeo_back=%@\n",
+		win.bounds.size.width, win.bounds.size.height, ws.top, ws.left, ws.bottom, ws.right,
+		rect(self), os.top, os.left, os.bottom, os.right,
+		rect(_gear), rect([self chipForLabel:@"START"]), rect([self chipForLabel:@"BACK"])];
 }
 
 - (void)noteWatchdog:(NSString *)what
@@ -2329,13 +2981,18 @@ static CGVector pdStickCurve(CGVector raw)
 		inputIosPadSetRStick(0, 0);
 		_sentMask = 0;
 		_sentStick = CGVectorMake(0, 0);
+		_latchMask = 0;
+		_unpublishedMask = 0;
 		if (inputIosPointerIsActive()) {
 			inputIosPointerClear();
 		}
 		return;
 	}
 
-	unsigned mask = _buttonMask;
+	// D-086: a press lifted before this publish still goes out, once.
+	unsigned mask = _buttonMask | _latchMask;
+	_latchMask = 0;
+	_unpublishedMask = 0;
 
 	// _menuOpen and the gear were refreshed by +publishInput before it decided
 	// whether to call this at all (D-037), so by here both are this frame's.
@@ -2390,7 +3047,16 @@ static CGVector pdStickCurve(CGVector raw)
 		mask |= PDPadA;   // "Use / Accept"
 	}
 
-	inputIosPadSet(mask, 0, 0);
+	// The weapon wheel's drag is the LEFT stick, which is what the active menu
+	// reads (activemenutick.c) and, under CONTROLMODE_PC, nothing else the shell
+	// drives - look is degrees and the touch stick is the right stick. -128..127
+	// with screen-down pad-negative, the convention of every stick here.
+	int wheelX = 0, wheelY = 0;
+	if (_wheelArmed && (mask & PD_CK_RADIAL)) {
+		wheelX = (int)lround(_wheelStick.dx * 127.0);
+		wheelY = (int)lround(-_wheelStick.dy * 127.0);
+	}
+	inputIosPadSet(mask, wheelX, wheelY);
 	_sentMask = mask;
 
 	// The menu pointer. Active ONLY while a dialog is open - see overlay 0019.
@@ -2412,13 +3078,29 @@ static CGVector pdStickCurve(CGVector raw)
 		// test in this port's history passed through the one branch a finger
 		// can never reach. Half a point is below what a panel can resolve and
 		// well under the aiming error the suppression exists to prevent.
+		// D-083: the button is no longer the finger. It is the click a lifted
+		// TAP owes (-liftPointerAt:), played out here at the lift point: an aim
+		// frame, then kMenuClickFrames-1 frames down. The aim-then-click rule
+		// above still holds - the point is frozen for the whole click, so only
+		// its first frame can have moved.
 		const CGFloat kPointerStillSlop = 0.5;
-		const BOOL moved = hypot(_pointerPoint.x - _pointerPublished.x,
-		                         _pointerPoint.y - _pointerPublished.y) > kPointerStillSlop;
-		_pointerPublished = _pointerPoint;
-		inputIosPointerSet((float)(_pointerPoint.x / sz.width),
-		                   (float)(_pointerPoint.y / sz.height),
-		                   (_pointerDown && !moved) ? 1 : 0);
+		BOOL button = NO;
+		CGPoint at = _pointerPoint;
+		if (_clickFrames > 0) {
+			at = _clickPoint;
+			button = _clickFrames < kMenuClickFrames;
+			if (--_clickFrames == 0 && _clickQueued) {
+				_clickQueued = NO;
+				_clickFrames = kMenuClickFrames;
+				_clickPoint = _clickQueuedPoint;
+			}
+		}
+		const BOOL moved = hypot(at.x - _pointerPublished.x,
+		                         at.y - _pointerPublished.y) > kPointerStillSlop;
+		_pointerPublished = at;
+		inputIosPointerSet((float)(at.x / sz.width),
+		                   (float)(at.y / sz.height),
+		                   (button && !moved) ? 1 : 0);
 		if (_pendingWheel) {
 			inputIosPointerAddWheel(_pendingWheel);
 			_pendingWheel = 0;
@@ -2430,6 +3112,8 @@ static CGVector pdStickCurve(CGVector raw)
 		_pointerValid = NO;
 		_pointerDown = NO;
 		_pendingWheel = 0;
+		_clickFrames = 0;
+		_clickQueued = NO;
 	}
 
 	if (_pendingLookX != 0.0 || _pendingLookY != 0.0) {
@@ -2487,9 +3171,14 @@ static CGVector pdStickCurve(CGVector raw)
 	}
 
 	if (_editing) {
-		// In the editor a tap is not a press; the bridge's way to move a chip
-		// is `drag`. Reported rather than silently ignored.
-		return what;
+		// In the editor a tap is not a press: it is a finger down and up through
+		// the editor's own path - select a chip, or hit the selected chip's eye
+		// badge (D-088). Moving a chip is `drag`.
+		NSString *r = [self editBeganAt:p];
+		if (_dragChip) {
+			[self commitDrag];
+		}
+		return [NSString stringWithFormat:@"%@ %@", what, r];
 	}
 
 	// A synthetic touch has no UITouch, so the handlers are driven with nil and
@@ -2498,12 +3187,28 @@ static CGVector pdStickCurve(CGVector raw)
 	[self beginTouchAt:p touch:nil];
 
 	PDTouchButtonView *b = [self buttonAtPoint:p];
+	if (ms <= 0 && b) {
+		// HOLD 0 (D-086): the lift in the same delivery as the press, with no
+		// frame between them - what UIKit does when the system's edge gate
+		// releases a touch it held back. The instrument for the latch.
+		// HOLD < 0 (`tap X Y cancel`): the same, but CANCELLED - touchesCancelled's
+		// path, which must never become a press.
+		[self liftChip:b latch:(ms == 0)];
+		if (ms < 0) {
+			if ([self isAimChip:b]) { [self clearAimDrag]; }
+			if ([self isWheelChip:b]) { [self clearWheel]; }
+			return [what stringByAppendingString:@" hold=cancel"];
+		}
+		if ([self isAimChip:b]) { [self clearAimDrag]; }
+		if ([self isWheelChip:b]) { [self clearWheel]; }
+		return [what stringByAppendingString:@" hold=0"];
+	}
 	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(MAX(16, ms) * NSEC_PER_MSEC)),
 		dispatch_get_main_queue(), ^{
 			if (b) {
-				b.held = NO;
-				self->_buttonMask &= ~b.mask;
+				[self liftChip:b latch:YES];
 				if ([self isAimChip:b]) { [self clearAimDrag]; }
+				if ([self isWheelChip:b]) { [self clearWheel]; }
 			} else if (self->_menuOpen) {
 				[self liftPointerAt:p];
 			} else if (p.x < self.bounds.size.width * kStickZoneFrac) {
@@ -2559,8 +3264,8 @@ static CGVector pdStickCurve(CGVector raw)
 
 	[self beginTouchAt:p touch:nil];
 	PDTouchButtonView *aimChip = [self buttonAtPoint:p];
-	if (![self isAimChip:aimChip]) {
-		aimChip = nil;
+	if (![self isAimChip:aimChip] && ![self isWheelChip:aimChip]) {
+		aimChip = nil;   // (or the WHEEL chip: the same hold-drag-lift, D-085)
 	}
 	NSLog(@"perfectdark: [touch] stream %@ %d steps of %.1f,%.1f every %.1f ms",
 		what, steps, perStep.dx, perStep.dy, ms);
@@ -2575,6 +3280,10 @@ static CGVector pdStickCurve(CGVector raw)
 					[self addLookFrom:CGPointMake(at.x - perStep.dx, at.y - perStep.dy) to:at];
 				} else if ([what hasPrefix:@"menu"]) {
 					[self movePointerTo:at];
+				} else if (self->_wheelArmed) {
+					// A stream that started on the WHEEL chip is the wheel's
+					// drag: the radial menu stays open and the slice follows.
+					[self moveWheelTo:at];
 				} else if (self->_aimDragArmed) {
 					// A stream that started on the AIM chip is the hold-and-drag
 					// aim: R stays down for the length of the stream and the
@@ -2589,12 +3298,18 @@ static CGVector pdStickCurve(CGVector raw)
 			self->_stickValue = CGVectorMake(0, 0);
 			self->_lookTouch = nil;
 			[self hideStickChrome];
+			if ([what hasPrefix:@"menu"]) {
+				// A stream is a whole finger: it lifts (D-083), and a lift is
+				// where a menu tap clicks - a stream that travelled does not.
+				[self liftPointerAt:CGPointMake(p.x + perStep.dx * steps, p.y + perStep.dy * steps)];
+			}
 			if (aimChip) {
 				// The lift: the same release a finger makes, which is what
 				// leaves aim mode.
 				aimChip.held = NO;
 				self->_buttonMask &= ~aimChip.mask;
 				[self clearAimDrag];
+				[self clearWheel];
 			}
 			NSLog(@"perfectdark: [touch] stream done");
 		});
@@ -2634,6 +3349,8 @@ static CGVector pdStickCurve(CGVector raw)
 		_dragGrab = CGVectorMake(chip.center.x - p.x, chip.center.y - p.y);
 		_dragUnit = CGPointMake(chip.center.x / MAX(1.0, self.bounds.size.width),
 		                        chip.center.y / MAX(1.0, self.bounds.size.height));
+		_dragStartUnit = _dragUnit;
+		_editSelected = chip.label;
 		chip.held = YES;
 		for (int i = 1; i <= 8; i++) {
 			[self dragChipTo:CGPointMake(p.x + d.dx * i / 8, p.y + d.dy * i / 8)];

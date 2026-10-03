@@ -526,15 +526,39 @@ void PD_SetSettingsSheet(bool on);
 @interface PDHostViewController : UIViewController
 @end
 
+#import "PDSettingsViewController.h"
+
 /**
- * The 3D settings table (M6, plan §2.10).
+ * The 3D settings rows (M6, plan §2.10) as ONE table section (D-082).
  *
- * A UIKit table — the same spec-driven shape, the same PDDefaults machinery and
- * the same row kinds as app/ios/PDSettingsViewController.m — hosted inside the
- * SwiftUI `.sheet`, because a UIKit modal presented directly over an open
+ * The row model, the cells, the controls' handlers and the "3D Settings |
+ * Reset" header view. Owned by a PDSettingsViewController, which draws it as
+ * its last section under the iOS ones — on every visionOS settings surface.
+ */
+@interface PDVision3DRows : NSObject
+- (instancetype)initWithTableView:(UITableView *)tableView;
+/** Redraw the 3D section of every page that has one. Any thread. */
++ (void)reloadAll;
++ (CGFloat)headerHeight;
+@property (nonatomic, readonly) NSInteger count;
+- (UIView *)headerViewForWidth:(CGFloat)width;
+- (UITableViewCell *)cellForRow:(NSInteger)row;
+- (void)didSelectRow:(NSInteger)row;
+- (BOOL)pressRowNamed:(NSString *)name;
+/** This section's row index for a row's short name, or NSNotFound. */
+- (NSInteger)rowIndexNamed:(NSString *)name;
+/** `3d settings seg <name> <index>`: through the control, as a finger would. */
+- (NSString *)setSegmentNamed:(NSString *)name to:(NSInteger)segIndex;
+/** One `[3d] settings row: [Group] Title (name)` line per row (the M6 gate). */
+- (void)logRows;
+@end
+
+/**
+ * The settings sheet's table: the WHOLE settings page (D-082), hosted inside
+ * the SwiftUI `.sheet` because a UIKit modal presented directly over an open
  * immersive space silently fails (SETTINGS-SPEC :13-37).
  */
-@interface PDVisionSettingsViewController : UITableViewController
+@interface PDVisionSettingsViewController : PDSettingsViewController
 /** The one on screen, or nil. Main thread. */
 + (PDVisionSettingsViewController *)current;
 /** Re-read every row's value from NSUserDefaults. */

@@ -839,6 +839,11 @@ int pdIosPacingWaitForPresent(void)
 	return [PDPacing.shared waitForPresent];
 }
 
+int pdIosPresentAllowed(void)
+{
+	return PDPacing.shared.presentAllowed ? 1 : 0;
+}
+
 void pdPacingSnapshot(PDPacingSnap *out)
 {
 	if (!out) {

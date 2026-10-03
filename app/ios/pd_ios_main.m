@@ -239,6 +239,11 @@ int pdSDLMain(int argc, char *argv[])
 		// the scene delegate. PDDeepLink.m explains what was measured.
 		[PDDeepLink install];
 
+		// Copies into added-content/ or Documents that a killed app never
+		// finished (D-075) - hidden from every scan by their leading dot, and
+		// removed here before anything looks or copies.
+		[PDXbla sweepPartialCopies];
+
 		// Before the engine: a missing or wrong ROM is a fatal error inside
 		// romdataInit() (romdata.c:204-238) and a phone has nowhere to put an
 		// SDL message box. This returns only once a ROM the engine will accept
@@ -267,6 +272,9 @@ int pdSDLMain(int argc, char *argv[])
 		// is a scan and a stat rather than a quarter of a gigabyte on the
 		// thread UIKit draws from.
 		[PDXbla runUnpackUntilReady];
+		// GE Plus's two files: looked for once now, on a background queue, so the
+		// settings page has an answer the first time it opens (D-072).
+		[PDXbla warmGoldenEyeScan:nil];
 
 		// A texture pack dropped into Files: unpack it and write the row-order
 		// marker BEFORE the engine's first texture load, for the same reason
@@ -295,6 +303,23 @@ int pdSDLMain(int argc, char *argv[])
 		// which makes the same Return ACCEPT the name rather than be dropped on
 		// the floor by inputTextHandler().
 		SDL_SetHintWithPriority(SDL_HINT_RETURN_KEY_HIDES_IME, "1", SDL_HINT_OVERRIDE);
+
+#if !TARGET_OS_VISION
+		// The "picture squeezed into the left of the screen until relaunch"
+		// fault (D-077). The engine's window is RESIZABLE, so with no hint
+		// SDL's view controller claims portrait as well as landscape
+		// (UIKit_GetSupportedOrientations). And on EVERY keyboard notification
+		// in the process - the Files picker's search field raises one - SDL's
+		// view controller recomputes its view frame (updateKeyboard ->
+		// UIKit_ComputeViewFrame), deciding landscape vs portrait from
+		// UIApplication.statusBarOrientation, which under the UIScene life
+		// cycle is Unknown. Unknown plus "portrait is supported" = portrait:
+		// SDL laid its view out 420x912 on a 912x420 scene and kept it. The
+		// app is landscape-only on iPhone and iPad (Info.plist); saying so to
+		// SDL makes that computation answer landscape whatever the status bar
+		// claims. PDGeometry.m repairs any portrait shape that still gets in.
+		SDL_SetHintWithPriority(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight", SDL_HINT_OVERRIDE);
+#endif
 
 		[PDPacing.shared startWithBypass:pdReplayRun];
 		PDPacing.shared.targetHz = PDDefInt(PDDefRefreshHz) >= 120 ? 120 : 60;

@@ -70,6 +70,15 @@ int playerIosGetPos(float *x, float *y, float *z);
 // engine question, not a screenshot one.
 int playerIosGetAimMode(void);
 
+// overlay 0052 — the two chips of D-085. A GoldenEye level (a converted
+// mission, or a GE Plus arena with GE Plus on: gehud.c's own test), whether the
+// right hand's gun has a second function, its weapon number + function (0/1),
+// and whether the active menu (the weapon wheel) is open + its slot (4 = centre).
+int playerIosOnGoldenEyeLevel(void);
+int playerIosGunHasSecondary(void);
+int playerIosGunState(int *function);
+int playerIosActiveMenu(int *slot);
+
 // src/game/options.c — CONTROLMODE_11 = 0 (N64 1.1), CONTROLMODE_PC = 8.
 int optionsGetControlMode(int mpchrnum);
 void optionsSetControlMode(int mpchrnum, int mode);
@@ -122,6 +131,15 @@ extern int g_PdAudioQueueLimit;
 extern int g_PdAudioPrimeSamples;
 extern int g_PdAudioOutSamples;
 extern int g_PdAudioRateMilli;
+// overlay 0023, D-078: hitch resyncs and the ratio's excursion since `audio reset`
+extern int g_PdAudioResyncUnder;
+extern int g_PdAudioResyncOver;
+extern int g_PdAudioDroppedSamples;
+extern int g_PdAudioRateMinMilli;
+extern int g_PdAudioRateMaxMilli;
+// overlay 0048: the burst drop is on, and the SDL_GetTicks() it began at
+extern int g_PdAudioDropping;
+extern unsigned int g_PdAudioDroppingSinceMs;
 
 // overlay 0026/0027 — the frame-breakdown instrument (app/gfx/pd_frame_prof.c).
 // Nothing outside the app can profile a sideloaded build on this device, so
@@ -171,6 +189,13 @@ int archiveExtract(const char *path, const char *destDir);
 // the path it is given and nothing else, so PDXbla can ask it pre-engine which
 // archive in added-content/ is NOT this game's release (D-070).
 int archiveFindEntry(const char *path, const char *needle);
+// port/src/geconvert.c: GE Plus's own ROM test - the cartridge name, game code
+// NGEE and both header CRCs of GoldenEye 007 (US), in any of the three dump
+// byte orders, from the first 0x40 bytes. Pure function, no engine needed.
+int geconvertHeaderIsGoldenEyeUs(const unsigned char *head, size_t len);
+// port/src/gebean.c (overlay 0050, D-081): Mod.XblaGoldenEye as THIS run took
+// it - read once, at the first ask after the config is loaded. Game thread.
+int gebeanSwitchIsOn(void);
 
 void texpackRefreshPacks(void);
 int texpackGetNumPacks(void);
@@ -204,6 +229,16 @@ int videoGetVsync(void);
 
 // app/gfx/gfx_angle_egl.mm
 void pdAngleGetDrawableSize(int *w, int *h);
+
+// overlay 0023 — the per-push audio trace (D-078), dumped by `audio trace`
+struct pdaudiotrace {
+	unsigned long long us;
+	int queued, outSamples, rateMilli, integ, flags;
+};
+#define PD_AUDIO_TRACE_LEN 16384
+extern struct pdaudiotrace g_PdAudioTrace[PD_AUDIO_TRACE_LEN];
+extern unsigned g_PdAudioTraceCount;
+extern int g_PdAudioTraceOn;
 
 #ifdef __cplusplus
 }

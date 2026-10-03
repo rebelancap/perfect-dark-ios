@@ -6,27 +6,28 @@
 // (vkQuake, q2repro). Nothing here is ours to re-choose; what IS ours is the
 // machinery, and that is deliberately the SAME machinery as the 2D page:
 // NSUserDefaults is the truth (PDDefaults.h `vp3d.*`), one row descriptor per
-// setting, and a UIKit inset-grouped table.
+// setting. Since D-082 the rows are not a table of their own: they are the
+// LAST SECTION of the settings page (PDSettingsViewController), under the iOS
+// sections, on every visionOS settings surface — see "The 3D rows" below.
 //
 // THREE THINGS ABOUT THE CHROME, EACH OF WHICH COST SOMEBODY A ROUND:
 //
 //   * A UIKIT MODAL PRESENTED DIRECTLY OVER AN OPEN IMMERSIVE SPACE SILENTLY
 //     FAILS (SETTINGS-SPEC :13-37). So this table is not presented by UIKit at
 //     all: PDVisionApp.swift hosts it inside a SwiftUI `.sheet`, which works,
-//     and the sheet's header bar (title, Reset pill, prominent Done) is
-//     SwiftUI's — a hosted navigation bar's Done and `safeAreaInset` both bury
+//     and the sheet's header bar (title, prominent Done) is SwiftUI's — Reset
+//     moved into the table's own "3D Settings | Reset" header at D-082, as in
+//     vkQuake and openQ4 — a hosted navigation bar's Done and `safeAreaInset` both bury
 //     controls instead.
 //   * THE SHEET'S CONTENT IS NEVER GIVEN A FORCED HEIGHT that it can overflow:
 //     SwiftUI centre-CLIPS taller content, which ate a Done bar and the first
 //     and last rows on device AND sim. This table scrolls internally, so the
 //     sheet's minHeight is a floor the content cannot exceed rather than a
 //     height it can overflow (see PDVisionApp.swift).
-//   * BEAN'S OPAQUE DARK BACKGROUND IS DELIBERATELY *NOT* COPIED HERE. On the
-//     2D page it exists so UIKit can stop compositing a live CAMetalLayer
-//     underneath it (PDSettingsViewController.m's own note). In 3D there is no
-//     live layer under this: the sheet is its own glass surface in the room and
-//     the 2D window is parked behind a curtain. So the table keeps the system
-//     material, which is what every other visionOS sheet looks like.
+//   * THE OPAQUE DARK BACKGROUND. D-054(b) left it off the 3D-only sheet (no
+//     live layer under a sheet in 3D). D-082 puts it back: the sheet IS the
+//     settings page now, and a plain table's floating headers must be opaque
+//     or the rows show through them as they slide under — openQ4's D-106.
 //
 // AND THE ONE ORDERING RULE (plan §2.9): the sheet must be GONE before the 3D
 // exit un-parks the window. pdVision3dSettingsSheetCloseAndWait() is called at
@@ -39,6 +40,7 @@
 
 #import "PDDefaults.h"
 #import "PDShell.h"
+#import "PDXbla.h"
 
 #include <math.h>
 #include <objc/runtime.h>
@@ -59,6 +61,12 @@ typedef NS_ENUM(NSInteger, PDVRowKind) {
 	PDVRowSegmented,
 	PDVRowInfo,
 	PDVRowButton,
+	// D-082: the 3D rows are ONE table section now (so its "3D Settings |
+	// Reset" header floats over all of them), and D-054's four groups survive
+	// inside it as a caption row above each group and a note row under it —
+	// where the grouped table had a section header and a section footer.
+	PDVRowCaption,
+	PDVRowNote,
 };
 
 @interface PDVRow : NSObject
@@ -157,7 +165,7 @@ void pdVision3dSettingsResetDefaults(void)
 	pdVision3dApplySettings();
 	pdVision3dCommitGeometry();
 	NSLog(@"perfectdark: [3d] settings RESET to defaults (Units and FPS kept)");
-	[PDVisionSettingsViewController reloadRows];
+	[PDVision3DRows reloadAll];
 }
 
 // ---------------------------------------------------------------------------
@@ -316,69 +324,82 @@ NSString *pdVision3dSettingsSet(NSString *row, NSString *value)
 	// is the only scripted path to the geometry on a simulator that injects no
 	// taps at all.
 	pdVision3dCommitGeometry();
-	[PDVisionSettingsViewController reloadRows];
+	[PDVision3DRows reloadAll];
 	NSLog(@"perfectdark: [3d] settings set %@ -> %@", r, took);
 	return took;
 }
 
 // ---------------------------------------------------------------------------
-// The table
+// The 3D rows (D-082)
+//
+// Not a table any more: a SECTION of one. The user, 2026-10-02: "all ios settings
+// should show in the vision pro settings above the 3d settings. we do this in
+// all ports so users can easily access settings." So on visionOS the settings
+// page — the ornament gear's sheet, in 2D and in 3D, AND the in-window gear's
+// page — is PDSettingsViewController's ONE table: the iOS sections in their iOS
+// order, then this, as its last section, under a "3D Settings | Reset" header.
+//
+// openQ4's shape (D-106 there, openq4_ios_settings.m:1199-1368): a PLAIN table,
+// whose current section header floats at the top of the viewport while you
+// scroll inside that section and is replaced on the way out of it. That is why
+// D-054's four groups are one section here rather than four: four sections
+// would float "Stereo" over the Reset header the moment Screen scrolled past.
+// The groups keep their names and their explanations as caption and note rows.
+//
+// This object owns the row model, the cells, and the controls' handlers — the
+// same code the sheet had, moved, not copied — and is owned by whichever
+// PDSettingsViewController is drawing it.
 // ---------------------------------------------------------------------------
 
-static __weak PDVisionSettingsViewController *sCurrent;
+/** Every live 3D-rows provider, so a bridge set or a Reset redraws all of them. */
+static NSHashTable<PDVision3DRows *> *sProviders;
 
-@implementation PDVisionSettingsViewController {
-	NSArray<NSString *> *_sections;
-	NSArray<NSArray<PDVRow *> *> *_rows;
+@implementation PDVision3DRows {
+	__weak UITableView *_tableView;
+	NSArray<PDVRow *> *_rows;
 }
 
-+ (PDVisionSettingsViewController *)current { return sCurrent; }
-
-+ (void)reloadRows
++ (void)reloadAll
 {
 	if (!NSThread.isMainThread) {
-		dispatch_async(dispatch_get_main_queue(), ^{ [self reloadRows]; });
+		dispatch_async(dispatch_get_main_queue(), ^{ [self reloadAll]; });
 		return;
 	}
-	[sCurrent.tableView reloadData];
-}
-
-- (instancetype)init
-{
-	return [super initWithStyle:UITableViewStyleInsetGrouped];
-}
-
-- (void)viewDidLoad
-{
-	[super viewDidLoad];
-	sCurrent = self;
-	self.tableView.allowsSelection = YES;
-	[self buildRows];
-	// EVERY ROW, BY NAME, IN THE LOG. "Every row in §2.10 is present" is an
-	// acceptance item, and a room screenshot can only ever show the rows above
-	// the fold of a sheet the simulator cannot scroll (it injects no taps at
-	// all). This line is what makes the claim checkable by the gate, and the
-	// screenshot is then what proves they are legible.
-	for (NSUInteger s = 0; s < _sections.count; s++) {
-		for (PDVRow *r in _rows[s]) {
-			NSLog(@"perfectdark: [3d] settings row: [%@] %@ (%@)",
-				_sections[s].length ? _sections[s] : @"-", r.title, r.name ?: @"-");
-		}
+	for (PDVision3DRows *p in sProviders.allObjects) {
+		[p reload];
 	}
-	NSLog(@"perfectdark: [3d] settings table loaded (%lu sections)",
-		(unsigned long)_sections.count);
 }
 
-- (void)viewDidAppear:(BOOL)animated
+- (instancetype)initWithTableView:(UITableView *)tableView
 {
-	[super viewDidAppear:animated];
-	sCurrent = self;
-	[self.tableView reloadData];
-	// The charter's evidence rule: a UIKit placement is proven by the view
-	// logging its own frame, never by "the screenshot looks right".
-	NSLog(@"perfectdark: [3d] settings table on screen frame=%@ content=%@",
-		NSStringFromCGRect(self.tableView.frame),
-		NSStringFromCGSize(self.tableView.contentSize));
+	if ((self = [super init])) {
+		_tableView = tableView;
+		[self buildRows];
+		if (!sProviders) {
+			sProviders = [NSHashTable weakObjectsHashTable];
+		}
+		[sProviders addObject:self];
+	}
+	return self;
+}
+
+- (NSInteger)count { return (NSInteger)_rows.count; }
+
+/**
+ * Redraw the 3D section only. A whole-table reload would rebuild ~40 iOS cells
+ * to change a number in one of these.
+ */
+- (void)reload
+{
+	UITableView *tv = _tableView;
+	const NSInteger s = tv.numberOfSections - 1;
+	if (s < 0) {
+		return;
+	}
+	[UIView performWithoutAnimation:^{
+		[tv reloadSections:[NSIndexSet indexSetWithIndex:(NSUInteger)s]
+		  withRowAnimation:UITableViewRowAnimationNone];
+	}];
 }
 
 // --- the rows --------------------------------------------------------------
@@ -399,143 +420,212 @@ static PDVRow *pdVInfo(NSString *title, NSString *name, NSString *(^info)(void))
 	return r;
 }
 
+/** A group's name, where the grouped table had a section header. */
+static PDVRow *pdVCaption(NSString *title)
+{
+	PDVRow *r = [PDVRow new];
+	r.kind = PDVRowCaption; r.title = title;
+	return r;
+}
+
+/** A group's explanation, where the grouped table had a section footer. */
+static PDVRow *pdVNote(NSString *text)
+{
+	PDVRow *r = [PDVRow new];
+	r.kind = PDVRowNote; r.title = text;
+	return r;
+}
+
 - (void)buildRows
 {
-	_sections = @[ @"Screen", @"Stereo", @"Panel", @"" ];
 	_rows = @[
-		@[
-			// SETTINGS-SPEC's four screen rows, in its order and its ranges.
-			pdVSlider(@"Screen Distance", @"dist", PDDef3DDistance, 1.0f, 8.0f,
-				^NSString *(float v) { return pdVLen(v, NO); }),
-			// Stored as the HALF-extent (what the compositor scales a unit quad
-			// by), shown as the full width (what a player means by "how wide").
-			pdVSlider(@"Screen Width", @"width", PDDef3DHalfWidth, 0.6f, 6.096f,
-				^NSString *(float v) { return pdVLen(v * 2.0f, NO); }),
-			pdVSlider(@"Screen Height", @"height", PDDef3DHalfHeight, 0.5f, 3.0f,
-				^NSString *(float v) { return pdVLen(v * 2.0f, NO); }),
-			// SIGNED readout: 0 is eye level and the sign is the whole meaning
-			// of the row. The panel tilts to face the viewer as it rises by
-			// construction (PDImmersive.m's pdMakeAnchor faces the frozen head
-			// from wherever the panel ends up), so there is no separate tilt.
-			pdVSlider(@"Screen Position Height", @"posh", PDDef3DPosHeight, -1.5f, 10.0f,
-				^NSString *(float v) { return pdVLen(v, YES); }),
-		],
-		@[
-			// Per cent of the proven default separation (3.15 PD units ~ a
-			// 63 mm IPD), which reads far better than raw units — and 0 % is
-			// the gate's own instrument: both eyes become the mono projection
-			// and an L/R pair must come out pixel-identical.
-			pdVSlider(@"Stereo Depth", @"depth", PDDef3DStereoDepthPct, 0.0f, 300.0f,
-				^NSString *(float v) { return [NSString stringWithFormat:@"%.0f%%", v]; }),
-			// RENAMED from "Crosshair Distance" (D-064). That was the user's own
-			// coinage and the family's shipped label (q2repro's SETTINGS-SPEC:
-			// "after living with 'focus distance' he coined this and it
-			// stuck"), and it was exactly right while the reticle LIVED on this
-			// plane. It does not any more: the crosshair now takes the depth of
-			// whatever it points at, so a row named after it would be naming
-			// the one thing it no longer controls. This is the convergence
-			// plane and nothing else, so it says so. PD units, 1 unit ~ 1 cm
-			// (constants.h:496), so the readout divides by 100 to reach metres;
-			// the stored key, the bridge row and `conv`/`crosshair` as bridge
-			// spellings are all unchanged, so nothing scripted has to move.
-			pdVSlider(@"Convergence", @"conv", PDDef3DCrosshairUnits, 100.0f, 1500.0f,
-				^NSString *(float v) { return pdVLen(v / 100.0f, NO); }),
-		],
-		@[
-			pdVSlider(@"Surroundings Dimming", @"dim", PDDef3DDimming, 0.0f, 1.0f,
-				^NSString *(float v) { return [NSString stringWithFormat:@"%.0f%%", v * 100.0f]; }),
-			// The eye target's size as a percentage of its base. Applied on
-			// RELEASE (see PDVRow.applyOnRelease): the ring is re-wrapped at a
-			// frame boundary, and doing that per sample of a drag would tear
-			// down and rebuild six textures sixty times a second.
-			({
-				PDVRow *r = pdVSlider(@"Render Resolution", @"render", PDDef3DRenderPct,
-					40.0f, 100.0f,
-					^NSString *(float v) { return [NSString stringWithFormat:@"%.0f%%", v]; });
-				r.snap = YES;
-				r.applyOnRelease = YES;
-				r;
-			}),
-			pdVInfo(@"Panel Width", @"panelw", ^NSString *{
-				int w = 0, h = 0; pdVisionEyeGetSize(&w, &h);
-				return [NSString stringWithFormat:@"%d px", w];
-			}),
-			pdVInfo(@"Panel Height", @"panelh", ^NSString *{
-				int w = 0, h = 0; pdVisionEyeGetSize(&w, &h);
-				return [NSString stringWithFormat:@"%d px", h];
-			}),
-			pdVInfo(@"Aspect Ratio", @"aspect", ^NSString *{
-				int w = 0, h = 0; pdVisionEyeGetSize(&w, &h);
-				return (h > 0) ? [NSString stringWithFormat:@"%.1f:9", 9.0 * (double)w / (double)h]
-				               : @"—";
-			}),
-			// The game's own counter (Video.DisplayFPS): it is drawn in PD's 2D
-			// pass, which lands in both eyes, so it appears on the panel. Same
-			// key as the 2D page's Show FPS — one setting, two places to reach
-			// it — which is also why Reset leaves it alone.
-			({
-				PDVRow *r = [PDVRow new];
-				r.kind = PDVRowSwitch; r.title = @"FPS on Panel"; r.name = @"fps";
-				r.key = PDDefShowFPS;
-				r;
-			}),
-		],
-		@[
-			({
-				PDVRow *r = [PDVRow new];
-				r.kind = PDVRowSegmented; r.title = @"Units"; r.name = @"units";
-				r.key = PDDef3DUnitsFeet;
-				r.choices = @[ @"m", @"ft" ];
-				r.values = @[ @0, @1 ];
-				r;
-			}),
-			({
-				PDVRow *r = [PDVRow new];
-				r.kind = PDVRowButton; r.title = @"Recenter Screen"; r.name = @"recenter";
-				r.action = ^{ pdVisionRecenter(); };
-				r;
-			}),
-		],
+		pdVCaption(@"Screen"),
+		// SETTINGS-SPEC's four screen rows, in its order and its ranges.
+		pdVSlider(@"Screen Distance", @"dist", PDDef3DDistance, 1.0f, 8.0f,
+			^NSString *(float v) { return pdVLen(v, NO); }),
+		// Stored as the HALF-extent (what the compositor scales a unit quad
+		// by), shown as the full width (what a player means by "how wide").
+		pdVSlider(@"Screen Width", @"width", PDDef3DHalfWidth, 0.6f, 6.096f,
+			^NSString *(float v) { return pdVLen(v * 2.0f, NO); }),
+		pdVSlider(@"Screen Height", @"height", PDDef3DHalfHeight, 0.5f, 3.0f,
+			^NSString *(float v) { return pdVLen(v * 2.0f, NO); }),
+		// SIGNED readout: 0 is eye level and the sign is the whole meaning
+		// of the row. The panel tilts to face the viewer as it rises by
+		// construction (PDImmersive.m's pdMakeAnchor faces the frozen head
+		// from wherever the panel ends up), so there is no separate tilt.
+		pdVSlider(@"Screen Position Height", @"posh", PDDef3DPosHeight, -1.5f, 10.0f,
+			^NSString *(float v) { return pdVLen(v, YES); }),
+		pdVNote(@"Where the screen hangs in the room. It is placed in front of you when 3D "
+		         "starts and then stays put — Recenter Screen, at the bottom, moves it to "
+		         "wherever you are looking now."),
+
+		pdVCaption(@"Stereo"),
+		// Per cent of the proven default separation (3.15 PD units ~ a
+		// 63 mm IPD), which reads far better than raw units — and 0 % is
+		// the gate's own instrument: both eyes become the mono projection
+		// and an L/R pair must come out pixel-identical.
+		pdVSlider(@"Stereo Depth", @"depth", PDDef3DStereoDepthPct, 0.0f, 300.0f,
+			^NSString *(float v) { return [NSString stringWithFormat:@"%.0f%%", v]; }),
+		// RENAMED from "Crosshair Distance" (D-064). That was the user's own
+		// coinage and the family's shipped label (q2repro's SETTINGS-SPEC:
+		// "after living with 'focus distance' he coined this and it
+		// stuck"), and it was exactly right while the reticle LIVED on this
+		// plane. It does not any more: the crosshair now takes the depth of
+		// whatever it points at, so a row named after it would be naming
+		// the one thing it no longer controls. This is the convergence
+		// plane and nothing else, so it says so. PD units, 1 unit ~ 1 cm
+		// (constants.h:496), so the readout divides by 100 to reach metres;
+		// the stored key, the bridge row and `conv`/`crosshair` as bridge
+		// spellings are all unchanged, so nothing scripted has to move.
+		pdVSlider(@"Convergence", @"conv", PDDef3DCrosshairUnits, 100.0f, 1500.0f,
+			^NSString *(float v) { return pdVLen(v / 100.0f, NO); }),
+		pdVNote(@"Stereo Depth is how far apart the two eyes' cameras sit: 0% is a flat "
+		         "picture, 100% is a normal pair of eyes. Convergence is the game distance "
+		         "that sits exactly ON the screen — nearer things come towards you, further "
+		         "things sit behind it. The crosshair is not on that plane: it takes the "
+		         "depth of whatever it is pointing at."),
+
+		pdVCaption(@"Panel"),
+		pdVSlider(@"Surroundings Dimming", @"dim", PDDef3DDimming, 0.0f, 1.0f,
+			^NSString *(float v) { return [NSString stringWithFormat:@"%.0f%%", v * 100.0f]; }),
+		// The eye target's size as a percentage of its base. Applied on
+		// RELEASE (see PDVRow.applyOnRelease): the ring is re-wrapped at a
+		// frame boundary, and doing that per sample of a drag would tear
+		// down and rebuild six textures sixty times a second.
+		({
+			PDVRow *r = pdVSlider(@"Render Resolution", @"render", PDDef3DRenderPct,
+				40.0f, 100.0f,
+				^NSString *(float v) { return [NSString stringWithFormat:@"%.0f%%", v]; });
+			r.snap = YES;
+			r.applyOnRelease = YES;
+			r;
+		}),
+		pdVInfo(@"Panel Width", @"panelw", ^NSString *{
+			int w = 0, h = 0; pdVisionEyeGetSize(&w, &h);
+			return [NSString stringWithFormat:@"%d px", w];
+		}),
+		pdVInfo(@"Panel Height", @"panelh", ^NSString *{
+			int w = 0, h = 0; pdVisionEyeGetSize(&w, &h);
+			return [NSString stringWithFormat:@"%d px", h];
+		}),
+		pdVInfo(@"Aspect Ratio", @"aspect", ^NSString *{
+			int w = 0, h = 0; pdVisionEyeGetSize(&w, &h);
+			return (h > 0) ? [NSString stringWithFormat:@"%.1f:9", 9.0 * (double)w / (double)h]
+			               : @"—";
+		}),
+		// The game's own counter (Video.DisplayFPS): it is drawn in PD's 2D
+		// pass, which lands in both eyes, so it appears on the panel. Same
+		// key as the Display section's Show FPS — one setting, two places to
+		// reach it — which is also why Reset leaves it alone.
+		({
+			PDVRow *r = [PDVRow new];
+			r.kind = PDVRowSwitch; r.title = @"FPS on Panel"; r.name = @"fps";
+			r.key = PDDefShowFPS;
+			r;
+		}),
+		pdVNote(@"Render Resolution is how many pixels the game draws for each eye, as a "
+		         "share of the full panel. Lower it if 3D stutters; the change takes effect "
+		         "as soon as you let go of the slider."),
+
+		// D-054's unnamed last group: no caption, as it had no header.
+		({
+			PDVRow *r = [PDVRow new];
+			r.kind = PDVRowSegmented; r.title = @"Units"; r.name = @"units";
+			r.key = PDDef3DUnitsFeet;
+			r.choices = @[ @"m", @"ft" ];
+			r.values = @[ @0, @1 ];
+			r;
+		}),
+		({
+			PDVRow *r = [PDVRow new];
+			r.kind = PDVRowButton; r.title = @"Recenter Screen"; r.name = @"recenter";
+			r.action = ^{ pdVisionRecenter(); };
+			r;
+		}),
 	];
 }
 
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tv { return (NSInteger)_sections.count; }
-- (NSInteger)tableView:(UITableView *)tv numberOfRowsInSection:(NSInteger)s
+/**
+ * EVERY ROW, BY NAME, IN THE LOG, under its group's name. "Every row in §2.10
+ * is present" is an acceptance item, and a room screenshot can only ever show
+ * the rows inside the sheet's viewport. This line is what makes the claim
+ * checkable by a gate (`settings row: [Group] Title (name)`, the M6 shape).
+ */
+- (void)logRows
 {
-	return (NSInteger)_rows[(NSUInteger)s].count;
-}
-- (NSString *)tableView:(UITableView *)tv titleForHeaderInSection:(NSInteger)s
-{
-	NSString *t = _sections[(NSUInteger)s];
-	return t.length ? t : nil;
-}
-
-- (NSString *)tableView:(UITableView *)tv titleForFooterInSection:(NSInteger)s
-{
-	NSString *t = _sections[(NSUInteger)s];
-	if ([t isEqualToString:@"Screen"]) {
-		return @"Where the screen hangs in the room. It is placed in front of you when 3D "
-		        "starts and then stays put — Recenter Screen, at the bottom, moves it to "
-		        "wherever you are looking now.";
+	NSString *group = @"-";
+	for (PDVRow *r in _rows) {
+		if (r.kind == PDVRowCaption) {
+			group = r.title;
+			continue;
+		}
+		if (r.kind == PDVRowNote) {
+			group = @"-";
+			continue;
+		}
+		NSLog(@"perfectdark: [3d] settings row: [%@] %@ (%@)", group, r.title, r.name ?: @"-");
 	}
-	if ([t isEqualToString:@"Stereo"]) {
-		return @"Stereo Depth is how far apart the two eyes' cameras sit: 0% is a flat "
-		        "picture, 100% is a normal pair of eyes. Convergence is the game distance "
-		        "that sits exactly ON the screen — nearer things come towards you, further "
-		        "things sit behind it. The crosshair is not on that plane: it takes the "
-		        "depth of whatever it is pointing at.";
-	}
-	if ([t isEqualToString:@"Panel"]) {
-		return @"Render Resolution is how many pixels the game draws for each eye, as a "
-		        "share of the full panel. Lower it if 3D stutters; the change takes effect "
-		        "as soon as you let go of the slider.";
-	}
-	return nil;
 }
 
-- (UITableViewCell *)tableView:(UITableView *)tv cellForRowAtIndexPath:(NSIndexPath *)ip
+// --- the header ------------------------------------------------------------
+
++ (CGFloat)headerHeight { return 92.0; }
+
+/**
+ * "3D Settings | Reset" — vkQuake's header view by way of openQ4
+ * (openq4_ios_settings.m:1317-1368), both of its traps included: the table must
+ * answer heightForHeaderInSection or a custom header is compressed, and the
+ * BUTTON is anchored with the label hung off its centre, or the pill overhangs
+ * the first row. OPAQUE, because a plain table's header floats over the rows.
+ */
+- (UIView *)headerViewForWidth:(CGFloat)width
 {
-	PDVRow *row = _rows[(NSUInteger)ip.section][(NSUInteger)ip.row];
+	UIView *hv = [[UIView alloc] initWithFrame:CGRectMake(0, 0, width, PDVision3DRows.headerHeight)];
+	hv.backgroundColor = [UIColor colorWithWhite:0.06 alpha:1.0];
+
+	UILabel *l = [UILabel new];
+	l.text = @"3D Settings";
+	l.font = [UIFont systemFontOfSize:20 weight:UIFontWeightSemibold];
+	l.textColor = UIColor.whiteColor;
+	l.translatesAutoresizingMaskIntoConstraints = NO;
+	[hv addSubview:l];
+
+	// A REAL tinted pill, not a bare text button: a bare one is nearly
+	// impossible to gaze-pinch (SETTINGS-SPEC-FROM-VKQUAKE.md:31-35). Orange,
+	// as the sheet bar's Reset was (D-054).
+	UIButtonConfiguration *cfg = [UIButtonConfiguration tintedButtonConfiguration];
+	cfg.title = @"Reset";
+	cfg.baseForegroundColor = UIColor.systemOrangeColor;
+	cfg.baseBackgroundColor = UIColor.systemOrangeColor;
+	cfg.contentInsets = NSDirectionalEdgeInsetsMake(10, 22, 10, 22);
+	UIButton *reset = [UIButton buttonWithConfiguration:cfg primaryAction:nil];
+	reset.translatesAutoresizingMaskIntoConstraints = NO;
+	[reset addTarget:self action:@selector(resetTapped) forControlEvents:UIControlEventTouchUpInside];
+	[hv addSubview:reset];
+
+	[NSLayoutConstraint activateConstraints:@[
+		[l.leadingAnchor constraintEqualToAnchor:hv.leadingAnchor constant:20],
+		[reset.trailingAnchor constraintEqualToAnchor:hv.trailingAnchor constant:-20],
+		[reset.bottomAnchor constraintEqualToAnchor:hv.bottomAnchor constant:-16],
+		[reset.topAnchor constraintGreaterThanOrEqualToAnchor:hv.topAnchor constant:8],
+		[l.centerYAnchor constraintEqualToAnchor:reset.centerYAnchor],
+		[l.trailingAnchor constraintLessThanOrEqualToAnchor:reset.leadingAnchor constant:-12],
+	]];
+	return hv;
+}
+
+/** The header's Reset: the 3D rows only, exactly as the sheet bar's was. */
+- (void)resetTapped
+{
+	NSLog(@"perfectdark: [3d] settings header Reset pressed");
+	pdVision3dSettingsResetDefaults();
+}
+
+// --- the cells -------------------------------------------------------------
+
+- (UITableViewCell *)cellForRow:(NSInteger)index
+{
+	PDVRow *row = _rows[(NSUInteger)index];
 	UITableViewCell *cell =
 		[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:nil];
 	cell.textLabel.text = row.title;
@@ -583,14 +673,26 @@ static PDVRow *pdVInfo(NSString *title, NSString *name, NSString *(^info)(void))
 		cell.selectionStyle = UITableViewCellSelectionStyleDefault;
 		cell.textLabel.textColor = cell.tintColor;
 		break;
+	case PDVRowCaption:
+		// What an inset-grouped section header looks like, as a row.
+		cell.textLabel.text = row.title.uppercaseString;
+		cell.textLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+		cell.textLabel.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
+		cell.userInteractionEnabled = NO;
+		break;
+	case PDVRowNote:
+		cell.textLabel.font = [UIFont systemFontOfSize:13];
+		cell.textLabel.textColor = [UIColor colorWithWhite:0.55 alpha:1.0];
+		cell.textLabel.numberOfLines = 0;
+		cell.userInteractionEnabled = NO;
+		break;
 	}
 	return cell;
 }
 
-- (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)ip
+- (void)didSelectRow:(NSInteger)index
 {
-	PDVRow *row = _rows[(NSUInteger)ip.section][(NSUInteger)ip.row];
-	[tv deselectRowAtIndexPath:ip animated:YES];
+	PDVRow *row = _rows[(NSUInteger)index];
 	if (row.kind == PDVRowButton && row.action) {
 		NSLog(@"perfectdark: [3d] settings row pressed: %@", row.title);
 		row.action();
@@ -602,19 +704,54 @@ static PDVRow *pdVInfo(NSString *title, NSString *name, NSString *(^info)(void))
  *
  * The simulator injects no taps at all on visionOS, so without this there is no
  * scripted path through a button row — the same gap `settings row` fills on the
- * 2D page.
+ * iOS sections.
  */
 - (BOOL)pressRowNamed:(NSString *)name
 {
-	for (NSArray<PDVRow *> *sec in _rows) {
-		for (PDVRow *row in sec) {
-			if ([row.name isEqualToString:name] && row.action) {
-				row.action();
-				return YES;
-			}
+	for (PDVRow *row in _rows) {
+		if ([row.name isEqualToString:name] && row.action) {
+			row.action();
+			return YES;
 		}
 	}
 	return NO;
+}
+
+/** This section's row index for a row name, or NSNotFound. */
+- (NSInteger)rowIndexNamed:(NSString *)name
+{
+	for (NSUInteger i = 0; i < _rows.count; i++) {
+		if ([_rows[i].name isEqualToString:name]) {
+			return (NSInteger)i;
+		}
+	}
+	return NSNotFound;
+}
+
+/**
+ * Move a SEGMENTED 3D row through its own control, exactly as a finger would
+ * (`3d settings seg units 0`) — the 3D twin of `settings seg`. The cell has to
+ * be on screen; the bridge scrolls to it first. Returns what it moved, or nil.
+ */
+- (NSString *)setSegmentNamed:(NSString *)name to:(NSInteger)segIndex
+{
+	const NSInteger i = [self rowIndexNamed:name];
+	UITableView *tv = _tableView;
+	if (i == NSNotFound || !tv || _rows[(NSUInteger)i].kind != PDVRowSegmented) {
+		return nil;
+	}
+	NSIndexPath *ip = [NSIndexPath indexPathForRow:i inSection:tv.numberOfSections - 1];
+	[tv scrollToRowAtIndexPath:ip atScrollPosition:UITableViewScrollPositionMiddle animated:NO];
+	[tv layoutIfNeeded];
+	UISegmentedControl *sc = (UISegmentedControl *)[tv cellForRowAtIndexPath:ip].accessoryView;
+	if (![sc isKindOfClass:UISegmentedControl.class] || segIndex < 0
+	    || segIndex >= (NSInteger)sc.numberOfSegments) {
+		return nil;
+	}
+	sc.selectedSegmentIndex = segIndex;
+	[self segChanged:sc];
+	return [NSString stringWithFormat:@"3D/%@ -> %@", _rows[(NSUInteger)i].title,
+		_rows[(NSUInteger)i].choices[(NSUInteger)segIndex]];
 }
 
 // --- the controls ----------------------------------------------------------
@@ -654,7 +791,7 @@ static PDVRow *pdVInfo(NSString *title, NSString *name, NSString *(^info)(void))
 		// re-wrapped a frame or two from now — so the info rows are refreshed
 		// after the boundary, not before it.
 		dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)),
-			dispatch_get_main_queue(), ^{ [PDVisionSettingsViewController reloadRows]; });
+			dispatch_get_main_queue(), ^{ [PDVision3DRows reloadAll]; });
 	}
 }
 
@@ -663,12 +800,14 @@ static PDVRow *pdVInfo(NSString *title, NSString *name, NSString *(^info)(void))
 	PDVRow *row = objc_getAssociatedObject(sw, @selector(commit));
 	[NSUserDefaults.standardUserDefaults setBool:sw.on forKey:row.key];
 	if ([row.key isEqualToString:PDDefShowFPS]) {
-		// An engine config key: it goes through the same apply as the 2D page,
-		// on the game thread, and is written to pd.ini straight away.
+		// An engine config key: it goes through the same apply as the iOS
+		// rows, on the game thread, and is written to pd.ini straight away.
 		[PDShell.shared enqueue:^{
 			PDDefaultsApplyToEngine();
 			configSave("$S/pd.ini");
 		}];
+		// The Display section's Show FPS is the same key, on the same page.
+		[PDSettingsViewController reloadRows];
 	} else {
 		pdVision3dApplySettings();
 	}
@@ -679,8 +818,71 @@ static PDVRow *pdVInfo(NSString *title, NSString *name, NSString *(^info)(void))
 	PDVRow *row = objc_getAssociatedObject(seg, @selector(commit));
 	[NSUserDefaults.standardUserDefaults setBool:(seg.selectedSegmentIndex == 1)
 	                                      forKey:row.key];
-	// Every length readout in the table just changed its unit.
+	NSLog(@"perfectdark: [3d] settings %@ -> %@", row.title,
+		row.choices[(NSUInteger)seg.selectedSegmentIndex]);
+	// Every length readout in the section just changed its unit.
+	[PDVision3DRows reloadAll];
+}
+
+@end
+
+// ---------------------------------------------------------------------------
+// The sheet's table
+//
+// The SAME page as the in-window gear's (D-082): a PDSettingsViewController,
+// iOS sections and the 3D section, hosted by PD3DSettingsSheet in the SwiftUI
+// `.sheet` instead of in its own UIWindow — a UIKit modal presented directly
+// over an open immersive space silently fails (SETTINGS-SPEC :13-37), and the
+// sheet's bar (title, Done) stays SwiftUI's. All this subclass adds is what the
+// bridge and the M6 gate already reach for: +current, the row log, the frame log.
+// ---------------------------------------------------------------------------
+
+static __weak PDVisionSettingsViewController *sCurrent;
+
+@implementation PDVisionSettingsViewController
+
++ (PDVisionSettingsViewController *)current { return sCurrent; }
+
++ (void)reloadRows
+{
+	if (!NSThread.isMainThread) {
+		dispatch_async(dispatch_get_main_queue(), ^{ [self reloadRows]; });
+		return;
+	}
+	[sCurrent.tableView reloadData];
+}
+
+- (instancetype)init
+{
+	return [super initWithStyle:UITableViewStylePlain];
+}
+
+- (void)viewDidLoad
+{
+	[super viewDidLoad];
+	sCurrent = self;
+	[self.rows3d logRows];
+	NSLog(@"perfectdark: [3d] settings table loaded (%ld sections, the last one 3D)",
+		(long)[self numberOfSectionsInTableView:self.tableView]);
+}
+
+- (void)viewDidAppear:(BOOL)animated
+{
+	[super viewDidAppear:animated];
+	sCurrent = self;
 	[self.tableView reloadData];
+	// The GoldenEye rows read a cached scan, as on the in-window page's open.
+	[PDXbla warmGoldenEyeScan:^{ [PDVisionSettingsViewController reloadRows]; }];
+	// The charter's evidence rule: a UIKit placement is proven by the view
+	// logging its own frame, never by "the screenshot looks right".
+	NSLog(@"perfectdark: [3d] settings table on screen frame=%@ content=%@",
+		NSStringFromCGRect(self.tableView.frame),
+		NSStringFromCGSize(self.tableView.contentSize));
+}
+
+- (BOOL)pressRowNamed:(NSString *)name
+{
+	return [self.rows3d pressRowNamed:name];
 }
 
 @end

@@ -1965,3 +1965,272 @@ pass and none needed its intent changed.
   `git checkout main && git merge --ff-only` rewrites every changed file. Use
   `git branch -f main <branch>` (or `update-ref`) while on the branch, then
   `git checkout main` - same commit, no file written.
+
+## Traps earned (GE Plus on iOS, 1.0.1.1)
+
+- **A shell window made before the scene connects is never drawn.** The
+  onboarding screen and the XBLA "preparing" note are created in `pdSDLMain`
+  before UIKit has connected the scene on a cold launch (their own log says
+  `scene=no`, the scene's willConnect comes ~5 ms later). Under the UIScene life
+  cycle a sceneless window is invisible, and `UIApplication.windows` does not list
+  it, so the graft never saw it: the first-launch onboarding was a black screen.
+  `PDShell.overlayWindow` is now a graft candidate (D-073). Look for `scene=no`
+  plus a `grafted a sceneless window … (root PDOnboardingViewController)` line.
+- **GE Plus's startup notices block the main thread by design.** Upstream's
+  conversion/unpack loops draw a notice and `SDL_Delay(16)` on the game thread;
+  the work is on a worker. Overlay 0042 pumps SDL's events once a notice frame so
+  UIKit is serviced. The shell watchdog still writes a "frame hook silent" hang
+  dump at 2 s of any such wait - expected, not a hang.
+- **`added-content/` holds three kinds of thing now**, and the engine looks
+  differently for each: the GoldenEye ROM at the top level only (by size, then
+  header), the GoldenEye XBLA release as a folder holding `files/new/char` or a
+  `.7z/.zip` with an entry under it, two levels deep (never a `.rar`), and
+  Perfect Dark's release four levels deep (overlay 0001) skipping GoldenEye's.
+  `PDXbla` mirrors all three; keep them in step at a pin bump.
+- **The engine moves a GoldenEye ROM from the base dir into `added-content/`.**
+  On iOS the base dir is Documents itself, so a ROM dropped at the top of the
+  app's folder is found and moved on the next launch.
+- **GE Plus leaves state in `pd.ini`:** `Mod.GexPlusMapsOffered=1` and
+  `Mod.MapMods=GoldenEye Arenas`. Removing the GoldenEye files from a simulator
+  container does not remove these; reset both (edit in place) before a gate run
+  that must look like a fresh install.
+- **The container's `tmp/` does not survive `simctl install`** (the data
+  container is re-created with a new UUID and Documents migrated). Stage bridge
+  test inputs again after every reinstall.
+- **`simctl io screenshot` and the game's own capture disagree about what is on
+  screen during startup:** the engine's notice is a game frame, so only
+  `simctl io` (rotate first) shows it; the bridge's `screenshot` needs a running
+  engine.
+- **Bridge test path for the GoldenEye rows:** `geplus pick <rom|xbla> <path>`
+  runs the real picker's completion (validation, copy, replace, alert) with a
+  file in the container; `geplus` prints the cached scan, `geplus scan` refreshes
+  it. The Files picker's own UI cannot be driven by injected touches.
+- **Never remove the destination before the copy has succeeded (D-075).** A
+  same-name replace's destination IS the user's existing file, and a picked file
+  can be the very file already in `added-content/`. Every copy into the user's
+  folders goes through `+[PDXbla copyFileSafely:to:same:error:]`: same inode →
+  nothing touched; else copy to `.pd-adding-<uuid>.partial`, then `rename(2)`.
+  Temp files are dot-prefixed so no scan (engine `fsScanDir` or shell) sees
+  them, and are swept at launch. Bridge: `xbla pick <path>` drives the Xbox 360
+  row's copy; `adopt fail copy|swap` makes the next copy fail (dev builds only).
+- **Any loop that draws without the pacer must check `pdIosPresentAllowed()`
+  (D-075).** The game loop's presents stop at the pacer while backgrounded; a
+  loop calling `videoStartFrame/videoEndFrame` itself (GE Plus's startup
+  notices) does not reach the pacer and would keep issuing GL. Overlay 0042 pumps
+  events first, then skips the frame while the app is in the background. The
+  simulator suspends a backgrounded app about a second later (`ps` state `Ss`),
+  which pauses the unpack's worker too; it resumes on return. The bridge does not
+  answer `state` while a notice loop runs; use the patch's own
+  `gexplus: notice held / drawing again` log lines (frames drawn, presents).
+
+## Traps earned (1.0.1.2: the keyboard that turned the picture portrait, and the stall that played high)
+
+- **Any keyboard notification re-lays-out SDL's view, and under UIScene SDL
+  guesses the orientation wrong.** SDL's view controller observes the app-wide
+  `UIKeyboardWillShow/WillHide` and recomputes its frame through
+  `UIKit_ComputeViewFrame`, which trusts `UIApplication.statusBarOrientation`
+  (Unknown under the scene life cycle) unless the window cannot be portrait. A
+  RESIZABLE window can, so the view went 390×844 on an 844×390 scene and stayed
+  there (D-077). Fixed by `SDL_HINT_ORIENTATIONS` (landscape) in
+  `pd_ios_main.m`. Reproduce with the bridge's `geo keyboard` — the simulator's
+  hardware keyboard sends only a will-hide, and that alone was enough.
+- **The simulator never raises a keyboard on its own**, and the Files picker's
+  search field is out of process: a scripted picker round never touched this
+  path. `presented` / `picker cancel|pick <path>` drive the REAL picker; `geo`
+  shows every size link; lifecycle.txt has a `GEO …` line for every change.
+- **`[UIDevice setValue:forKey:@"orientation"]` does nothing to a scene.** It was
+  tried as a stand-in for turning the phone; under UIScene, rotation comes from
+  FrontBoard and this changes nothing. There is no Simulator.app on this Mac to
+  rotate the device either.
+- **A stall is followed by a burst.** `schedAudioFrame` runs `amgrFrame`
+  `diffframe60` times — uncapped — so the frame after a 2 s hitch renders 2 s of
+  audio at once. Anything regulating the queue must treat that as a
+  discontinuity, not as clock drift (D-078, M-050).
+- **The simulator's audio unit pulls irregularly** (two buffers late, then two at
+  once): an honest steady-state queue reaches ~3,460 samples at a 1,536 setpoint.
+  A burst threshold at setpoint + 2 buffers fired falsely; + 3 buffers does not.
+- **The M-001 replay cannot see audio.** It runs `--no-sound`; audio changes are
+  measured with `audio trace` + `stall`, never with the gate.
+
+## Traps earned (1.0.1.3: GoldenEye XBLA in its Xbox 360 package form)
+
+- **`fsScanDir()` skips every name starting with a dot.** A cache wipe written with it
+  leaves the marker, a spool and any note behind; and an empty legacy marker that
+  survives a wipe makes a half-written cache look finished. `gebeanRemoveTree()` uses
+  `opendir`/`readdir` itself.
+- **Upstream's zip extractor reads the whole archive into memory** and inflates each
+  entry whole (`archiveExtractZip`); a `.zip` holding the 739 MB package would be ~1 GB
+  resident. The package form streams zips with zlib instead (`archiveStreamEntry`).
+  `archiveExtract7z()` (no filter) is `SzArEx_Extract`, which allocates the whole solid
+  block — never point it at a GoldenEye archive.
+- **Perfect Dark's importer takes ANY STFS package and any unrecognised .7z/.zip.**
+  GoldenEye's package form is both, and sorts first. Overlay 0047 + the shell's
+  `looksLikePackage`/`isOtherRelease` skip title 584108A9; keep the two in step at a bump.
+- **The cache marker names its source** (`.extracted13` = "<name> <size>"). A test that
+  swaps forms by hand must expect a re-unpack; the same package moved from bare to a
+  folder keeps its name and size and is (rightly) not re-unpacked.
+- **The `geplus` scan is cached from launch**: after the engine's startup unpack the row
+  says "unpacked when the app next opens" until settings open or `geplus scan`.
+- **Two simulators share the host's loopback:** run the Vision Pro with
+  `SIMCTL_CHILD_PD_BRIDGE_PORT=8785` while lane 3 holds 8775, and terminate one app before
+  `pgrep`-ing "perfectdark.app/perfectdark" — both sims' processes match.
+- **On the Vision Pro simulator GE Plus's startup notices are invisible** (black window,
+  though `notice_drawn` and `egl_swaps` count up). Pre-existing; judge visionOS unpack
+  progress from the cache, not from screenshots.
+- **`footprint -p` prints units** (`52 MB`, `1553 KB`): parse both fields.
+
+## Traps earned (1.0.1.4: the package reader held to its package)
+
+- **A file table read from the user's file sizes nothing on its own say-so** (D-080,
+  overlay 0049). 0046 summed the table's block counts in 32 bits; a table can say
+  0x8000 × 4 GB. Bound every entry against the package's own length (known from the
+  archive reader before the first piece), reject duplicates, sum in 64 bits.
+- **`(size + 0xfff) / 0x1000` wraps for a u32 size near 4 GB** — the count came out 0
+  and the per-file check was skipped; the sum check caught it only by luck. Widen first.
+- **A malformed-package test needs no 740 MB**: `tools/stfs-malformed.py` writes
+  60 KB packages in the real archive's folder layout; the streaming path only checks
+  the STFS header and the entry name, so a tiny package exercises all of it. The
+  bare-package path has a 64 MB floor (`GEBEAN_PKG_MIN_SIZE`) and is not reached.
+- **The overlay has no macOS build of its own**: `build/oracle-clang` is pristine
+  upstream. `cmake -S build/src -B build/oracle-overlay` with the clang oracle's
+  flags (`CMakeCache.txt`) gives one in ~2 min; the cache is `$E/cache` beside the
+  binary, `added-content/` beside it is scanned at startup with no GoldenEye ROM.
+
+## Traps earned (GoldenEye XBLA switch, D-081)
+
+- **`Mod.XblaGoldenEye` is read ONCE a run** (overlay 0050, `gebeanSwitchIsOn()`), at
+  the first ask after `configInit()` — before the shell's first-frame settings push.
+  A changed value only lands if pd.ini holds it at the next start, so the shell saves
+  pd.ini the moment it moves. A seeded replay (`--fixed-step`) skips the push: set the
+  key in pd.ini for an A/B, as with every other key.
+- **The 1.0.0 pin (245eca04c) registered `Mod.XblaGoldenEye` with default 0**, so a
+  pd.ini last written by 1.0.0 says `XblaGoldenEye=0`. Pins since 1.0.1 drop the line
+  (`configSave` writes registered keys only). Such an ini costs one launch in the N64
+  look; the first-frame push writes 1 and saves.
+- **`settings <section>` sometimes lands short** (the page is still animating in): send it
+  two or three times, 2 s apart, before a screenshot. On this build `simctl io
+  screenshot` came back already landscape (2532×1170) — check the size before rotating.
+## Traps earned (D-083: menus by finger)
+
+- **Every injected menu test passed through the one path a thumb never takes.** The
+  bridge's `drag` makes all eight moves inside one frame, so no frame ever saw the finger
+  still and the click-on-down never fired; a real drag starts still and pauses. Use
+  `stream X Y DX DY N MS` with `MS` slower than a frame (e.g. `stream 600 330 0 -3 60 25`)
+  for anything a finger does over time. `stream` now lifts at its end in a menu (it used
+  to leave the pointer down for ever).
+- **The wheel keys are a boolean.** `inputKeyPressed(VK_MOUSE_WHEEL_DN)` says "at least
+  one"; the latched count reached the engine and was thrown away at `inputs.mousescroll`.
+  Anything sized has to read `inputIosPointerWheelTicks()`.
+- **A menu LIST is one item.** The pointer's focus walk stops at the list, and a click
+  selects the list's current index wherever it lands — check list dialogs (file select,
+  Load/Preset Games, Mission Select) separately from row dialogs.
+- **Upstream's side-click needs `mousey` inside the dialog's span** — test side taps
+  ABOVE and BELOW a short dialog, not level with it, or the old bug passes.
+- **A slider needs the button down for two frames** (edit mode on the first, the value on
+  the second via `mouseheld`); a one-frame click leaves its value unchanged.
+- **`simctl io screenshot` on the 17e came back 2532×1170 (already landscape)** this
+  round — check the size before rotating, as the trap says.
+- `menu.c` measures dialogs in the native viewport, which is **320×220** here
+  (`video.c`), not 240 tall: size anything on screen from `videoGetNativeHeight()`
+  (`menuIosRowFraction()`), never from a remembered constant.
+
+## Traps earned (D-084/D-085: the pad report and the two chips)
+
+- **Before chasing a "did not hide with a pad" report, read the phone's
+  `pd.touch.mode`.** `xcrun devicectl device copy from … --source
+  Library/Preferences/com.rebelancap.perfectdark.plist` (read-only) answered D-084 in
+  one pull: 1 = On = always shown. `lifecycle.txt` now carries a `pad connected|absent`
+  line with the mode and the overlay state for exactly this.
+- **The simulator always has a GCController** (its virtual "Gamepad"):
+  `pad absent: 1 GCController(s)` under `pad fake off` is the override working, not a
+  bug. `pad fake` resets to `auto` (= connected) on every relaunch.
+- **The active menu reads the LEFT stick** (`joyGetStickXOnSample`), which the shell
+  otherwise never drives — `inputIosPadSet(mask, x, y)`'s stick arguments were always
+  0 until the wheel chip. Any future chip that feeds them must be released with the
+  chip, or the next wheel opens already pointing somewhere.
+- **The wheel's highlight lags one frame and that is what makes a lift choose**:
+  activemenutick.c closes (`amClose()` → `amApply(slotnum)`) BEFORE it reads that
+  frame's stick, so dropping bit and stick together keeps the slot. Do not zero the
+  stick a frame before the button.
+- **The menu's slots are relative to the gun in hand** (the current weapon sits on
+  the left slice), so a wheel test picks a direction from a screenshot of the open
+  menu, not from a fixed slot table.
+- **A hidden chip is still in `_buttons`.** `-buttonAtPoint:` skips hidden ones now
+  (the ALT chip on a GoldenEye level); anything new that hides a gameplay chip
+  outside the menu split must go through `-applyChipRules` or it re-appears on the
+  next `-applyMenuChrome`.
+- **New chips need no layout migration**: the saved layout is keyed by label and the
+  table is the fallback (D-032), so an old save shows new chips at their defaults.
+
+## Traps earned (D-085 addendum / D-086: the chips fix)
+
+- **A chip press that never spans a publish is invisible to the engine.** The game loop is
+  the main thread and the overlay publishes once a frame, so a touch whose began and ended
+  land in one UIKit pump used to set and clear its bit unseen. `-liftChip:` latches it now;
+  any new lift path must go through it, any new deliberate drop must NOT.
+- **A cancelled touch is never a tap** — chips included (D-086 review). `liftChip:latch:NO` for
+  touchesCancelled and the watchdog; `tap X Y cancel` is that path's instrument. Any early
+  return before `-publish` must release `_latchMask` as well as `_buttonMask`, or a latched
+  bit waits for the next publish and fires as a phantom press.
+- **`tap X Y 0` is the instrument** (lift in the same delivery as the press); every bridge
+  tap with a hold >= 16 ms spans frames and passes either way, which is why 1.0.1.6's
+  ALT tests were green. `touch latch off` reproduces the old behaviour on the same build.
+- **`pad <button> down` only reaches the engine while the layer is hidden** — the overlay
+  rewrites the whole injected mask every publish. Use `touch auto` + `pad fake on` first
+  (with `touch on`, as the gate leaves it, the pad bit is overwritten the next frame).
+- **The active menu skips an empty slice** (`amGetSlotDetails` text "" → no move): with only
+  DY357 + Falcon 2 the LEFT slice is empty and a left drag stays on the centre. Pick the
+  drag direction from a screenshot of the open menu.
+- **`state` polling is far faster than `stream`'s steps** — sample with a sleep between, or
+  a whole drag reads "stick 0.00".
+- The bottom row sits on the home-indicator strip and SDL defers all edges for a
+  fullscreen window: touches there may reach UIKit late on a device (D-086 hypothesis —
+  `Documents/touch-watchdog.txt` LATCH lines are the evidence to pull).
+
+## Traps earned (D-087: the crosshair that was a pistol whip)
+
+- **No sight on a melee function is Perfect Dark, not a bug.** PISTOL WHIP (Falcon 2, DY357)
+  and the fists draw no crosshair even with AIM held (`currentPlayerGetSight`,
+  `g_ModSightMeleeNone`). The choice is kept per weapon across missions. Before chasing a
+  "missing crosshair", read `player_gun` / `player_gunfunc` / `touch_alt_engaged` from `state`.
+- **Chicago starts unarmed** (`player_gun=1`, fists → no sight); `give 2` equips a Falcon 2.
+- **Combat Sim on the sim can report a pad** (`touch_pad=1`, layer hidden) right after boot;
+  `pad fake off` + `touch on` before tapping chips. Simulants also kill an idle player in
+  seconds — a red screen with no sight is death, not the bug.
+- **The sight can stay off a few seconds after a function swap with a guard in view** (seen
+  once, not reproduced) — sample several frames before calling a shot "no sight".
+
+## Traps earned (D-088: hiding chips from the layout editor)
+
+- **Hidden chips use `b.hidden`, the one hide mechanism** (D-085's ALT rule). Anything that
+  sets a gameplay chip's `hidden` must OR in `-userHid:` — `-applyMenuChrome`,
+  `-applyChipRules`, `-leftFireVisible` do; a new path that forgets brings a hidden chip back.
+- **An edge chip's badge, clamped on-screen, lands inside its own ring** (SWAP on the 17e) —
+  the body would toggle instead of drag. Check `touch_hide_badge` against the chip centre
+  after moving chips near an edge.
+- **A selecting tap must not store a position**, or touching a chip to reach its badge pins
+  it against future default tables. `-commitDrag` skips an unmoved chip.
+- `layout reset` / the red pill clears hidden flags with positions (they share
+  `pd.touch.layout`); `defaults` edits by hand must keep `x`/`y` numbers or the chip falls
+  back to the table (a `{hidden: 1}`-only entry is valid and means "default spot, hidden").
+
+
+## Traps earned (D-089/D-090: the free editor and the upside-down pack)
+
+- **"Upside down" in a menu is not automatically a framebuffer.** The Game Pak portrait is a
+  ROM texture drawn by a texture rectangle with a negative dtdy; a pack image in the wrong row
+  order inverts it like any other texture. Before blaming ANGLE or the pin, pull the phone's
+  `pd.ini` and Documents listing (read-only `devicectl device copy from` / `device info files`)
+  and look at `texture-packs/*/bottomup.txt` — and read its first line: ours says
+  "Written by Perfect Dark for iOS."
+- **The row order of a pack is per release, not per family.** PD Plus HD <= v0.09 is in N64
+  order (needs the marker); v0.10+ (Ultimate / XBLA / Forever Plus HD) is stored the right way
+  up (must NOT have one). Upstream's Community Packs encodes this per catalogue entry; the
+  shell's Files-drop installer now matches it by name (`pdNameIsRightWayUpPlusHd`). A new pack
+  family with its own convention needs a line there.
+- **The oracle front end cannot be screenshotted from the CLI**: the file menus run with no
+  level frame advancing, so `--screenshot-frame` never fires there, and `screencapture -l` and
+  System Events keystrokes (F12) are TCC-blocked for this shell. Compare pack orientation on a
+  level instead (chicago 0x1d, frame 1500: the "BEAN" graffiti is the readable feature).
+- **A chip's centre may be off the view (D-089)**: saved units are no longer in [0, 1]. A
+  bridge `hit` exactly AT x = width answers `MISS outside-overlay`; probe a point inside.

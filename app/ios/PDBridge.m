@@ -21,6 +21,7 @@
 #ifndef PD_PUBLIC
 
 #import <UIKit/UIKit.h>
+#import <AVFoundation/AVFoundation.h>
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -40,6 +41,7 @@
 #import "PDAudio.h"
 #import "PDController.h"   // round Q: `pad fake` / `pad lx`
 #import "PDWatchdog.h"     // round S: `heartbeat` / `hang` / `dump`
+#import "PDGeometry.h"     // D-077: `geo` / `presented` / `picker`
 #if !TARGET_OS_VISION
 #import "PDSceneDelegate.h"
 #endif
@@ -58,6 +60,11 @@ extern void bgunEquipWeapon(int weaponnum);
 // that fired is a burst whose quantity went DOWN.
 extern void bgunGiveMaxAmmo(int force);
 extern int bgunGetAmmoQtyForWeapon(unsigned weaponnum, unsigned func);
+// GE Plus's startup notice (overlay 0042) and the window surface's presents
+// (app/gfx/gfx_angle_egl.mm): the background instrument of D-075.
+extern int g_GexPlusNoticeDrawn;
+extern int g_GexPlusNoticeHeld;
+extern unsigned long long pdAngleSwapCount(void);
 
 static const int kDefaultPort = 8775;
 static const NSTimeInterval kEngineTimeout = 5.0;
@@ -229,13 +236,15 @@ static NSString *pdErr(NSString *fmt, ...)
 
 	if ([cmd isEqualToString:@"help"]) {
 		return @"commands: state | screenshot [path] | stage 0xNN | cfg get <k> | cfg set <k> <v> |"
-		        " tap X Y | doubletap X Y | hit X Y | windows | heal <1-6> | pump <ms> | point X Y | drag X Y DX DY | stream X Y DX DY N MS | pacing [reset|engine HZ|early on|off|wait sem|runloop] | pad <button> <down|up> | touch <auto|on|off> | link <url> |"
+		        " tap X Y [HOLD_MS | 0 = lift in the same delivery | cancel = cancelled in it; in the layout editor it selects a chip or hits its eye badge] | doubletap X Y | hit X Y | windows | heal <1-6> | pump <ms> | point X Y | drag X Y DX DY | stream X Y DX DY N MS | pacing [reset|engine HZ|early on|off|wait sem|runloop] | pad <button> <down|up> | touch <auto|on|off|latch on|off> | link <url> |"
 		        " settings [close|<section>|row <section> <n>] | settings seg <section> <n> <i> | layout <edit|done|reset> |"
 		        " audio [volume 0-100|mute on|off|mode 0-4|reset] | render <pct> |"
 		        " prof [reset] | gfx |"
 		        " gamefile <defaults|save|load [dev]> |"
-		        " rom | xbla [wait N|release on|off] | texpack | quit |"
+		        " rom | xbla [wait N|release on|off|pick <path>] | geplus [scan|pick rom|xbla <path>|release on|off] | adopt fail copy|swap|off | texpack | quit |"
 		        " heartbeat | hang <ms> | dump | graft <on|off> | hide60 <on|off> |"
+		        " stall <ms>|every <s> <ms>|off | geo [repair on|off|now] | presented | picker cancel|dismiss|pick <path> |"
+		        " audio trace on|off|dump [name] | audio interrupt begin|end |"
 		        " give <weaponnum> [noammo] | ammo <weaponnum> | pacing engine <hz|auto>"
 #if TARGET_OS_VISION
 	        " | 3d <on|off|park|unpark|crown|showeye|state|recenter|depth <pct>|gunconv <units>"
@@ -254,8 +263,10 @@ static NSString *pdErr(NSString *fmt, ...)
 		} else {
 			out = [shell stateReport];
 		}
-		NSString *extra = [NSString stringWithFormat:@"settings_page=%d\n",
-			(int)PDSettingsViewController.isPresented];
+		NSString *extra = [NSString stringWithFormat:@"settings_page=%d\n"
+			"present_allowed=%d\nnotice_drawn=%d\nnotice_held=%d\negl_swaps=%llu\n",
+			(int)PDSettingsViewController.isPresented, pdIosPresentAllowed(),
+			g_GexPlusNoticeDrawn, g_GexPlusNoticeHeld, pdAngleSwapCount()];
 		return [out stringByAppendingString:extra];
 	}
 
@@ -273,6 +284,59 @@ static NSString *pdErr(NSString *fmt, ...)
 	// into Caches yet, and - the half the gate needs - a way to WAIT for that,
 	// because the unpack is a quarter of a gigabyte on a background thread and
 	// polling a container path from the host is racing the app's own writes.
+	// GE Plus's two files (D-072). `geplus` alone: the cached scan, no I/O on
+	// the main thread. `geplus scan`: rescan in the background and wait for it.
+	// `geplus pick <rom|xbla> <path>`: the settings rows' picker completion with
+	// a file the simulator can read - the same validation, copy into
+	// added-content/, replace and alert as a real Files pick. The real picker's
+	// UI is the one thing it does not exercise.
+	// `geplus release on|off`: the GoldenEye XBLA switch row (D-081), the same
+	// path as the row; answers what pd.ini now says and what this run uses.
+	if ([cmd isEqualToString:@"geplus"]) {
+		if (argv.count >= 3 && [argv[1].lowercaseString isEqualToString:@"release"]) {
+			BOOL on = [argv[2].lowercaseString isEqualToString:@"on"];
+			[PDSettingsViewController setSwitchRow:PDDefXblaGoldenEye to:on];
+			__block int ini = -1, run = -1;
+			if (![shell enqueueAndWait:^{
+					char v[16] = { 0 };
+					if (configGetValue("Mod.XblaGoldenEye", v, sizeof(v))) {
+						ini = atoi(v);
+					}
+					run = gebeanSwitchIsOn();
+				} timeout:kEngineTimeout]) {
+				return pdErr(@"engine did not reach a frame boundary");
+			}
+			return [NSString stringWithFormat:@"ge_xbla asked=%d ini=%d this_run=%d (next launch takes it)",
+				(int)on, ini, run];
+		}
+		if (argv.count >= 4 && [argv[1].lowercaseString isEqualToString:@"pick"]) {
+			NSInteger kind = [argv[2].lowercaseString isEqualToString:@"rom"] ? PDGoldenEyeRom : PDGoldenEyeXbla;
+			NSString *path = [[argv subarrayWithRange:NSMakeRange(3, argv.count - 3)] componentsJoinedByString:@" "];
+			if (![NSFileManager.defaultManager fileExistsAtPath:path]) {
+				return pdErr(@"no such file: %@", path);
+			}
+			[PDSettingsViewController goldenEyePicked:kind url:[NSURL fileURLWithPath:path]];
+			return [NSString stringWithFormat:@"geplus picked %@ for %@ (see the alert and `geplus`)",
+				path.lastPathComponent, argv[2]];
+		}
+		dispatch_semaphore_t done = dispatch_semaphore_create(0);
+		__block NSString *lines = nil;
+		BOOL rescan = argv.count >= 2 && [argv[1].lowercaseString isEqualToString:@"scan"];
+		dispatch_async(dispatch_get_main_queue(), ^{
+			if (rescan) {
+				[PDXbla warmGoldenEyeScan:^{
+					lines = [PDXbla goldenEyeStateLines];
+					dispatch_semaphore_signal(done);
+				}];
+			} else {
+				lines = [PDXbla goldenEyeStateLines];
+				dispatch_semaphore_signal(done);
+			}
+		});
+		dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(10 * NSEC_PER_SEC)));
+		return lines ?: pdErr(@"no answer from the main thread");
+	}
+
 	if ([cmd isEqualToString:@"xbla"]) {
 		if (argv.count >= 2 && [argv[1].lowercaseString isEqualToString:@"wait"]) {
 			NSTimeInterval limit = argv.count > 2 ? argv[2].doubleValue : 600.0;
@@ -303,7 +367,47 @@ static NSString *pdErr(NSString *fmt, ...)
 			}
 			return [NSString stringWithFormat:@"xbla_release asked=%d xbla_enabled=%d", (int)on, now];
 		}
+		// `xbla pick <path>`: the Xbox 360 row's / onboarding's picker copy with a
+		// file already in the container (the real picker cannot be driven here).
+		if (argv.count >= 3 && [argv[1].lowercaseString isEqualToString:@"pick"]) {
+			NSString *path = [[argv subarrayWithRange:NSMakeRange(2, argv.count - 2)] componentsJoinedByString:@" "];
+			if (![NSFileManager.defaultManager fileExistsAtPath:path]) {
+				return pdErr(@"no such file: %@", path);
+			}
+			__block NSString *dst = nil;
+			__block NSError *err = nil;
+			dispatch_semaphore_t done = dispatch_semaphore_create(0);
+			dispatch_async(dispatch_get_main_queue(), ^{
+				NSError *e = nil;
+				dst = [PDXbla adoptPickedURL:[NSURL fileURLWithPath:path] error:&e];
+				err = e;
+				[PDXbla invalidateScan];
+				dispatch_semaphore_signal(done);
+			});
+			if (dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(120 * NSEC_PER_SEC)))) {
+				return pdErr(@"no answer from the main thread");
+			}
+			return dst ? [NSString stringWithFormat:@"xbla_pick=ok dst=%@", dst]
+			           : [NSString stringWithFormat:@"xbla_pick=FAILED why=%@", err.localizedDescription];
+		}
 		return [PDXbla stateLines];
+	}
+
+	// `adopt fail copy|swap|off`: make the next copy into added-content/ fail at
+	// that stage (PDXbla +failNextCopyAt:, D-075), to prove a failed replace
+	// leaves the existing file as it was.
+	if ([cmd isEqualToString:@"adopt"]) {
+		if (argv.count >= 3 && [argv[1].lowercaseString isEqualToString:@"fail"]) {
+			NSString *stage = argv[2].lowercaseString;
+			if (![@[ @"copy", @"swap", @"off" ] containsObject:stage]) {
+				return pdErr(@"usage: adopt fail copy|swap|off");
+			}
+			dispatch_async(dispatch_get_main_queue(), ^{
+				[PDXbla failNextCopyAt:[stage isEqualToString:@"off"] ? nil : stage];
+			});
+			return [NSString stringWithFormat:@"adopt_fail_next=%@", stage];
+		}
+		return pdErr(@"usage: adopt fail copy|swap|off");
 	}
 
 	if ([cmd isEqualToString:@"screenshot"]) {
@@ -453,7 +557,9 @@ static NSString *pdErr(NSString *fmt, ...)
 				// touch_sent_mask is the only proof a chip reached the engine,
 				// and it is zero again 140 ms later (D-037).
 				what = [v injectTapAtPoint:p
-				         holdMilliseconds:(argv.count > 3 ? argv[3].integerValue : 140)];
+				         holdMilliseconds:(argv.count > 3
+				             ? ([argv[3].lowercaseString isEqualToString:@"cancel"] ? -1 : argv[3].integerValue)
+				             : 140)];
 			}
 			dispatch_semaphore_signal(done);
 		});
@@ -843,6 +949,151 @@ static NSString *pdErr(NSString *fmt, ...)
 		return [NSString stringWithFormat:@"hang_queued_ms=%d", ms];
 	}
 
+	// `stall <ms>` / `stall every <s> <ms>` / `stall off` — block the GAME
+	// thread for a fixed time, once or on a repeat, to reproduce a hitch
+	// deterministically (D-078: what the audio does across one). Unlike `hang`
+	// this is a plain sleep with nothing else attached, and it is short: the
+	// watchdog's 2 s trip is not the point.
+	if ([cmd isEqualToString:@"stall"]) {
+		static volatile int sStallEveryMs = 0, sStallEveryLen = 0, sStallGen = 0;
+		NSString *what = argv.count > 1 ? argv[1].lowercaseString : @"";
+		if ([what isEqualToString:@"off"]) {
+			sStallGen++;
+			sStallEveryMs = 0;
+			return @"stall_every=off";
+		}
+		if ([what isEqualToString:@"every"] && argv.count > 3) {
+			const int periodMs = (int)lround(argv[2].doubleValue * 1000.0);
+			const int len = argv[3].intValue;
+			if (periodMs < 100 || len <= 0 || len > 5000) {
+				return pdErr(@"usage: stall every <seconds> <ms 1-5000>");
+			}
+			const int gen = ++sStallGen;
+			sStallEveryMs = periodMs;
+			sStallEveryLen = len;
+			[NSThread detachNewThreadWithBlock:^{
+				while (sStallGen == gen) {
+					usleep((useconds_t)sStallEveryMs * 1000);
+					if (sStallGen != gen) {
+						break;
+					}
+					const int l = sStallEveryLen;
+					[shell enqueue:^{
+						PDLifecycle("bridge: stall %d ms (repeat)", l);
+						usleep((useconds_t)l * 1000);
+					}];
+				}
+			}];
+			return [NSString stringWithFormat:@"stall_every_ms=%d stall_ms=%d", periodMs, len];
+		}
+		const int ms = what.intValue;
+		if (ms <= 0 || ms > 5000) {
+			return pdErr(@"usage: stall <ms 1-5000> | stall every <seconds> <ms> | stall off");
+		}
+		[shell enqueue:^{
+			PDLifecycle("bridge: stall %d ms", ms);
+			usleep((useconds_t)ms * 1000);
+		}];
+		return [NSString stringWithFormat:@"stall_queued_ms=%d", ms];
+	}
+
+	// `geo` / `geo repair on|off|now` — the picture's size chain (D-077).
+	if ([cmd isEqualToString:@"geo"]) {
+		NSString *what = argv.count > 1 ? argv[1].lowercaseString : @"";
+		NSString *arg = argv.count > 2 ? argv[2].lowercaseString : @"";
+		__block NSString *out = nil;
+		dispatch_semaphore_t done = dispatch_semaphore_create(0);
+		dispatch_async(dispatch_get_main_queue(), ^{
+			if ([what isEqualToString:@"repair"] && [arg isEqualToString:@"off"]) {
+				pdGeoRepairEnabled = 0;
+			} else if ([what isEqualToString:@"repair"] && [arg isEqualToString:@"on"]) {
+				pdGeoRepairEnabled = 1;
+			} else if ([what isEqualToString:@"repair"]) {
+				pdGeoCheckpoint("bridge geo repair");
+			} else if ([what isEqualToString:@"keyboard"]) {
+				// A real keyboard, raised from the topmost presented page: what
+				// the Files picker's search field does to every window in the
+				// app, SDL's included (D-077). `geo keyboard` shows it for 3 s.
+				UIWindow *top = nil;
+				for (UIScene *sc in UIApplication.sharedApplication.connectedScenes) {
+					if (![sc isKindOfClass:UIWindowScene.class]) {
+						continue;
+					}
+					for (UIWindow *w in ((UIWindowScene *)sc).windows) {
+						if (!w.hidden && w.isKeyWindow) {
+							top = w;
+						}
+					}
+				}
+				UIViewController *vc = top.rootViewController;
+				while (vc.presentedViewController) {
+					vc = vc.presentedViewController;
+				}
+				UITextField *tf = [[UITextField alloc] initWithFrame:CGRectMake(0, 0, 10, 10)];
+				tf.alpha = 0.02;
+				[vc.view addSubview:tf];
+				const BOOL ok = [tf becomeFirstResponder];
+				PDLifecycle("bridge: keyboard test field first responder=%d in %s", ok,
+					NSStringFromClass(vc.class).UTF8String);
+				dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+					[tf resignFirstResponder];
+					[tf removeFromSuperview];
+				});
+			} else if ([what isEqualToString:@"device"] && arg.length) {
+				// The PHYSICAL orientation, as UIKit's autorotation reads it.
+				// A simulator boots physically portrait and simctl cannot turn
+				// it; a phone in a player's hands is physically landscape. The
+				// difference matters to a window UIKit believes is portrait
+				// (D-076/D-077), so a script needs to be able to set it.
+				// 1 portrait, 3 landscape-left (home right), 4 landscape-right.
+				const long o = arg.integerValue;
+				[UIDevice.currentDevice setValue:@(o) forKey:@"orientation"];
+				[UIViewController attemptRotationToDeviceOrientation];
+				PDLifecycle("bridge: UIDevice orientation set to %ld", o);
+			}
+			out = [NSString stringWithFormat:@"geo_repair_enabled=%d\n%@", pdGeoRepairEnabled, pdGeoReport()];
+			dispatch_semaphore_signal(done);
+		});
+		if (dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)))) {
+			return pdErr(@"UIKit did not respond (is the game loop running?)");
+		}
+		return out;
+	}
+
+	// `presented` — every window of every scene and the controllers presented
+	// in it, with the orientations each one supports. `picker cancel` /
+	// `picker pick <path>` finish the REAL document picker the way a finger
+	// does (dismiss, then the delegate hears); `picker dismiss` dismisses
+	// whatever is on top (an alert: as if OK was pressed). D-077.
+	if ([cmd isEqualToString:@"presented"] || [cmd isEqualToString:@"picker"]) {
+		NSString *what = argv.count > 1 ? argv[1].lowercaseString : @"";
+		NSString *path = nil;
+		if ([what isEqualToString:@"pick"] && argv.count > 2) {
+			path = [[argv subarrayWithRange:NSMakeRange(2, argv.count - 2)] componentsJoinedByString:@" "];
+			if (![path hasPrefix:@"/"]) {
+				path = [NSHomeDirectory() stringByAppendingPathComponent:path];
+			}
+		}
+		__block NSString *out = nil;
+		dispatch_semaphore_t done = dispatch_semaphore_create(0);
+		dispatch_async(dispatch_get_main_queue(), ^{
+			if ([cmd isEqualToString:@"presented"] || what.length == 0) {
+				out = pdGeoPresentedReport();
+			} else if ([what isEqualToString:@"cancel"] || [what isEqualToString:@"dismiss"]) {
+				out = pdGeoPickerFinish(nil);
+			} else if (path) {
+				out = pdGeoPickerFinish(path);
+			} else {
+				out = @"ERR usage: picker [cancel|dismiss|pick <path>]";
+			}
+			dispatch_semaphore_signal(done);
+		});
+		if (dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)))) {
+			return pdErr(@"UIKit did not respond (is the game loop running?)");
+		}
+		return out;
+	}
+
 	// `dump` — write Documents/hang.txt now, from this socket thread.
 	if ([cmd isEqualToString:@"dump"]) {
 		const int n = PDWatchdogDumpNow("bridge dump");
@@ -882,6 +1133,15 @@ static NSString *pdErr(NSString *fmt, ...)
 			return pdErr(@"UIKit did not respond (is the game loop running?)");
 		}
 		return out;
+	}
+
+	// `touch latch on|off` (D-086): the zero-frame tap latch, switchable so the
+	// bug and the fix can be shown on one build with `tap X Y 0`.
+	if ([cmd isEqualToString:@"touch"] && argv.count > 2
+			&& [argv[1].lowercaseString isEqualToString:@"latch"]) {
+		const BOOL on = [argv[2].lowercaseString isEqualToString:@"on"];
+		[PDTouchOverlay setTapLatchEnabled:on];   // a BOOL read once a frame
+		return [NSString stringWithFormat:@"touch_latch=%d", (int)PDTouchOverlay.tapLatchEnabled];
 	}
 
 	if ([cmd isEqualToString:@"touch"] && argv.count > 1
@@ -949,9 +1209,18 @@ static NSString *pdErr(NSString *fmt, ...)
 		});
 		dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)));
 		NSDictionary *stored = [NSUserDefaults.standardUserDefaults dictionaryForKey:PDDefButtonLayout];
-		return [NSString stringWithFormat:@"%@\nlayout_entries=%lu\nlayout=%@",
+		NSMutableArray<NSString *> *hidden = [NSMutableArray array];
+		for (NSString *k in stored) {
+			id e = stored[k];
+			if ([e isKindOfClass:NSDictionary.class] && [((NSDictionary *)e)[@"hidden"] boolValue]) {
+				[hidden addObject:k];
+			}
+		}
+		[hidden sortUsingSelector:@selector(compare:)];
+		return [NSString stringWithFormat:@"%@\nlayout_entries=%lu\nlayout=%@\nlayout_hidden=%@",
 			out ?: @"timed out", (unsigned long)stored.count,
-			stored.count ? [stored.allKeys componentsJoinedByString:@","] : @"-"];
+			stored.count ? [stored.allKeys componentsJoinedByString:@","] : @"-",
+			hidden.count ? [hidden componentsJoinedByString:@","] : @"-"];
 	}
 
 	// The frame breakdown (app/gfx/pd_frame_prof.c, overlay 0026/0027). Nothing
@@ -1048,6 +1317,54 @@ static NSString *pdErr(NSString *fmt, ...)
 			return [PDAudio stateLines];
 		}
 		NSString *which = argv[1].lowercaseString;
+		if ([which isEqualToString:@"trace"]) {
+			// `audio trace on|off|dump [name]` — the per-push ring in overlay
+			// 0023 (D-078): queue level, ratio, integrator and what happened,
+			// one CSV row per push, written to Documents/<name>.
+			NSString *sub = argv.count > 2 ? argv[2].lowercaseString : @"";
+			if ([sub isEqualToString:@"on"]) {
+				g_PdAudioTraceCount = 0;
+				g_PdAudioTraceOn = 1;
+				return @"audio_trace=on";
+			}
+			if ([sub isEqualToString:@"off"]) {
+				g_PdAudioTraceOn = 0;
+				return @"audio_trace=off";
+			}
+			if ([sub isEqualToString:@"dump"]) {
+				NSString *name = argv.count > 3 ? argv[3] : @"audio-trace.csv";
+				NSString *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+				NSString *dst = [docs stringByAppendingPathComponent:name.lastPathComponent];
+				const unsigned n = g_PdAudioTraceCount;
+				const unsigned len = PD_AUDIO_TRACE_LEN;
+				const unsigned first = n > len ? n - len : 0;
+				NSMutableString *csv = [NSMutableString stringWithString:@"push,us,queued,out,rate_milli,integ_e6,flags\n"];
+				for (unsigned i = first; i < n; i++) {
+					const struct pdaudiotrace *t = &g_PdAudioTrace[i % len];
+					[csv appendFormat:@"%u,%llu,%d,%d,%d,%d,%d\n", i, (unsigned long long)t->us,
+						t->queued, t->outSamples, t->rateMilli, t->integ, t->flags];
+				}
+				[csv writeToFile:dst atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+				return [NSString stringWithFormat:@"audio_trace_rows=%u file=%@", n - first, dst];
+			}
+			return pdErr(@"usage: audio trace on|off|dump [name]");
+		}
+		if ([which isEqualToString:@"interrupt"]) {
+			// `audio interrupt begin|end` - posts the session's interruption
+			// notification as the system would (overlay 0048's test): `begin`
+			// makes SDL pause its AudioQueue the way a call or Siri does, and
+			// leaving out `end` is the lost-end case the shell's stalled-device
+			// watch exists for.
+			NSString *sub = argv.count > 2 ? argv[2].lowercaseString : @"";
+			if (![sub isEqualToString:@"begin"] && ![sub isEqualToString:@"end"]) {
+				return pdErr(@"usage: audio interrupt begin|end");
+			}
+			const AVAudioSessionInterruptionType t = [sub isEqualToString:@"begin"]
+				? AVAudioSessionInterruptionTypeBegan : AVAudioSessionInterruptionTypeEnded;
+			[NSNotificationCenter.defaultCenter postNotificationName:AVAudioSessionInterruptionNotification
+				object:AVAudioSession.sharedInstance userInfo:@{ AVAudioSessionInterruptionTypeKey : @(t) }];
+			return [NSString stringWithFormat:@"audio_interrupt=%@", sub];
+		}
 		if ([which isEqualToString:@"reset"]) {
 			// The queue counters are cumulative and a session that included a
 			// stage load has a min of zero for ever. Zero them, play, read.
@@ -1312,7 +1629,39 @@ static NSString *pdErr(NSString *fmt, ...)
 				return ok ? [NSString stringWithFormat:@"pressed %@", name]
 				          : pdErr([NSString stringWithFormat:@"no button row \"%@\"", name]);
 			}
-			return pdErr(@"usage: 3d settings <open|close|get|set <row> <value>|press <row>|reset>");
+			// D-082: the sheet is the whole settings page now, taller than any
+			// viewport, and the simulator cannot scroll it by hand. `scroll 3d 4`
+			// puts row 4 of the 3D section at the top (its header floating over
+			// it); `scroll display` an iOS section. `seg units 0` moves a 3D
+			// segmented row through its own control.
+			if ([sub isEqualToString:@"scroll"] || [sub isEqualToString:@"seg"]) {
+				if (argv.count < 4 || ([sub isEqualToString:@"seg"] && argv.count < 5)) {
+					return pdErr(@"usage: 3d settings scroll <section> [row] | 3d settings seg <row> <index>");
+				}
+				const BOOL scroll = [sub isEqualToString:@"scroll"];
+				NSString *a3 = argv[3];
+				const NSInteger n = argv.count > 4 ? argv[4].integerValue : 0;
+				__block NSString *out = nil;
+				dispatch_semaphore_t done = dispatch_semaphore_create(0);
+				dispatch_async(dispatch_get_main_queue(), ^{
+					PDVisionSettingsViewController *vc = PDVisionSettingsViewController.current;
+					if (vc && pdVision3dSettingsSheetUp()) {
+						if (scroll) {
+							[vc scrollToSection:a3 row:n];
+							out = [NSString stringWithFormat:@"scrolled to %@ row %ld", a3, (long)n];
+						} else {
+							out = [vc.rows3d setSegmentNamed:a3 to:n];
+							out = out ? [NSString stringWithFormat:@"set %@", out] : nil;
+						}
+					}
+					dispatch_semaphore_signal(done);
+				});
+				dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW,
+					(int64_t)(5 * NSEC_PER_SEC)));
+				return out ?: pdErr(@"3d settings %@: the sheet is not open, or no such row", sub);
+			}
+			return pdErr(@"usage: 3d settings <open|close|get|set <row> <value>|press <row>|reset"
+			              "|scroll <section> [row]|seg <row> <index>>");
 		}
 		// The ONE A/B round the plan allows on the gun's convergence (§2.4),
 		// and then this row goes. 0 restores C_gun = znear.

@@ -63,7 +63,9 @@ func PD_SetSettingsSheet(_ on: Bool) {
     DispatchQueue.main.async { PDAppModel.shared.settingsSheet = on }
 }
 
-/// Hosts the 3D settings table (UIKit) inside the sheet.
+/// Hosts the settings table (UIKit) inside the sheet: the WHOLE settings page
+/// since D-082 — the iOS sections, then the 3D rows under their own
+/// "3D Settings | Reset" header.
 ///
 /// A UIKit modal presented directly over an open immersive space silently
 /// fails, which is why this is a SwiftUI `.sheet` around a UIKit table rather
@@ -84,19 +86,19 @@ struct PDSettingsTableView: UIViewControllerRepresentable {
 ///     the content can never be taller than the surface;
 ///   * the header bar is ours, in a VStack above a Divider. A hosted
 ///     navigation bar's Done and `safeAreaInset` both bury controls instead.
-/// Reset is a real bordered pill and Done borderedProminent: a bare text
-/// button is nearly impossible to gaze-pinch.
+/// Done is borderedProminent: a bare text button is nearly impossible to
+/// gaze-pinch. D-082: the bar is vkQuake's ("Settings" + Done,
+/// VKQVisionApp.swift:229-238) now that the sheet is the whole settings page;
+/// Reset lives on the 3D section's own floating header in the table, as it
+/// does in vkQuake and openQ4, because it resets the 3D rows and nothing else.
 struct PD3DSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("3D Settings").font(.title2.bold())
+                Text("Settings").font(.title2.bold())
                 Spacer()
-                Button("Reset") { pdVision3dSettingsResetDefaults() }
-                    .buttonStyle(.bordered)
-                    .tint(.orange)
                 Button("Done") {
                     // Both, in this order: the SwiftUI dismissal, and the flag
                     // the ObjC side owns — so `3d state` cannot report a sheet

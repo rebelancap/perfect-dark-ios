@@ -69,8 +69,18 @@ static EGLConfig s_cfg;
 static EGLContext s_ctx = EGL_NO_CONTEXT;
 static EGLSurface s_surf = EGL_NO_SURFACE;
 static SDL_MetalView s_view;
+static SDL_Window *s_wnd;
 static CAMetalLayer *s_layer;
 static int s_interval = 1;
+// eglSwapBuffers calls on the window surface, for the bridge's `state`: the
+// instrument that shows nothing is presented while the app is in the
+// background (D-075). Written on the game thread only; a torn read is harmless.
+static volatile unsigned long long s_swaps;
+
+extern "C" unsigned long long pdAngleSwapCount(void)
+{
+	return s_swaps;
+}
 
 /**
  * The UIView SDL created for the game, so the shell can reach the UIWindow it
@@ -90,6 +100,12 @@ static int s_interval = 1;
 extern "C" void *pdAngleGetHostView(void)
 {
 	return (void *)s_view;
+}
+
+/** SDL's window, for the shell's size watch (app/ios/PDGeometry.m, D-077). */
+extern "C" void *pdAngleGetSDLWindow(void)
+{
+	return (void *)s_wnd;
 }
 
 /**
@@ -194,6 +210,7 @@ extern "C" int pdAngleInit(SDL_Window *wnd, char *errbuf, int errlen)
 {
 #define FAIL(...) do { snprintf(errbuf, errlen, __VA_ARGS__); return 0; } while (0)
 
+	s_wnd = wnd;
 	s_view = SDL_Metal_CreateView(wnd);
 	if (!s_view) {
 		FAIL("SDL_Metal_CreateView: %s", SDL_GetError());
@@ -511,6 +528,7 @@ extern "C" void pdAngleSwapBuffers(void)
 #endif
 	if (s_dpy != EGL_NO_DISPLAY && s_surf != EGL_NO_SURFACE) {
 		eglSwapBuffers(s_dpy, s_surf);
+		s_swaps = s_swaps + 1;
 	}
 }
 

@@ -98,12 +98,45 @@ goes, the app just unpacks it again. After that, **Settings → Xbox 360 (XBLA) 
 Xbox 360 textures and models** turns the whole release on or off; turning it on
 reloads the level, the same as pressing **F6** on the desktop build.
 
+### GoldenEye 007 — GE Plus (optional)
+
+Dab's Mod can also play **GoldenEye 007** inside Perfect Dark: its missions,
+its arenas in the Combat Simulator with simulants, its folder menus, its music.
+Nothing of GoldenEye's is in the app — it is converted from **your own
+GoldenEye 007 (US) N64 ROM**. Put the ROM in the same **`added-content`**
+folder, under any name (`.z64`, `.n64` or `.v64`), and open the app: the first
+launch converts it once (a few seconds, with a notice on screen), and **GE Plus**
+appears in the Perfect Menu. Only the US cartridge is accepted.
+
+If you also own the **GoldenEye XBLA** release, put it in `added-content` too,
+in whichever form you have it:
+
+- the release's own files in a **`.7z`** or **`.zip`** (or a folder of them,
+  with `files/new/char` inside), or
+- the **Xbox 360 package** — the single large file the console stores under
+  `584108A9/000D0000/` — on its own, in a folder, or in a `.7z` or `.zip`
+  (the console's folders inside the archive are fine).
+
+It is unpacked once on the next launch, with a progress notice: about 400 MB
+into the app's purgeable cache. An archive holding the package is read
+straight through without making a copy of the package, so it needs no more
+room than the other forms; keep around 1 GB free, and if there is not enough
+the game says how much it needs and tries again next time. Your own file is
+never changed. GE Plus then draws its HD characters, levels and guns whenever
+the **Xbox 360 textures and models** switch is on. A `.rar` is not read for
+GoldenEye; take the package out of it, or repack it as a `.7z`.
+
+Both files are found by what they are, not by their names. You can also add or
+replace them from **Settings → GoldenEye 007 (GE Plus)**, which says plainly if
+a file is not the right one; changes there take effect the next time you open
+the app.
+
 ### Everything else, in the same folder
 
 | Path | What it is |
 | --- | --- |
 | `pd.ntsc-final.z64` | the ROM (or `data/pd.ntsc-final.z64`) |
-| `added-content/` | your XBLA archive or package (and, optionally, a GoldenEye 007 ROM) |
+| `added-content/` | your XBLA archive or package, and optionally a GoldenEye 007 (US) ROM and the GoldenEye XBLA release (archive or package) |
 | `texture-packs/` | texture packs — a folder, or the `.zip`/`.7z` it came in |
 | `model-packs/` | model packs, one folder per pack |
 | `mods/` | mods and console-mod patches, exactly as downloaded |
@@ -125,10 +158,19 @@ options.
 **Touch controls** appear automatically when no controller is connected: a
 floating move stick anywhere on the left half of the screen, drag on the right
 to look, and glyph buttons for **FIRE**, **AIM**, **USE**, **CROUCH**,
-**RELOAD**, **SWAP** and the menu. Hold **AIM** and a second FIRE appears under
-your left thumb, so one thumb aims while the other shoots. **Double-tap the
-stick side to combat-roll.** Every button can be dragged and the whole set
-scaled — *Settings → Controls → Customize Touch Layout…*.
+**RELOAD**, **SWAP**, the gun's **secondary function** (the Xbox 360 pad's RB),
+the **weapon wheel** (LB) and the menu. Hold **AIM** and a second FIRE appears under
+your left thumb, so one thumb aims while the other shoots. Hold the **weapon
+wheel** button and slide your thumb towards a weapon; let go to pick it. On
+GoldenEye levels the secondary-function button is hidden while the gun in hand
+has only one function, which is every GoldenEye gun. The secondary-function
+button lights up while the gun is on its second function — a pistol whip or
+punch has no crosshair, so a missing crosshair means tap it again. **Double-tap
+the stick side to combat-roll.** Every button can be dragged and the whole set
+scaled — *Settings → Controls → Customize Touch Layout…*. Touch a button there
+and an eye appears beside it: tap the eye to hide that button (say, if you use
+the weapon wheel instead of swap), tap it again to bring it back. The menu
+button cannot be hidden. Reset brings every button back to where it started.
 
 Menus are driven by touch as well: tap a row to select it, exactly as a mouse
 would on the desktop build.
@@ -149,6 +191,8 @@ the pause menu and briefings, and gets out of the way while you are playing.
   own Audio Options page.
 - **Xbox 360 (XBLA)** — import a package, and the one switch that turns the
   whole release on.
+- **GoldenEye 007 (GE Plus)** — what was found of the GoldenEye ROM and the
+  GoldenEye XBLA release, and a button to add or replace each.
 - **Texture packs** — the packs you have dropped in, and Community Packs.
 - **Diagnostics** — live frame rate and the device's thermal state.
 

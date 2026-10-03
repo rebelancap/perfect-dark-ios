@@ -84,6 +84,11 @@ void PDTouchOverlaySetFakePad(int state);
  */
 - (void)reassertTouchability;
 
+/** D-086: latch a chip press that was lifted before any frame saw it (on by
+ *  default; the bridge's `touch latch on|off`). */
++ (void)setTapLatchEnabled:(BOOL)on;
++ (BOOL)tapLatchEnabled;
+
 /** Append one line to Documents/touch-watchdog.txt (the bridge's self-test). */
 - (void)noteWatchdog:(NSString *)what;
 

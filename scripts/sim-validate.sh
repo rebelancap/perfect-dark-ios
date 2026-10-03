@@ -335,12 +335,12 @@ W="$(get points | cut -dx -f1)"
 H="$(get points | cut -dx -f2)"
 [ -n "$W" ] && [ -n "$H" ] || fail "no points size in state"
 
-# FIRE sits at unit 0.8609, 0.7548 of the FULL view (PDTouchOverlay.m kButtons,
+# FIRE sits at unit 0.8609, 0.7240 of the FULL view (PDTouchOverlay.m kButtons,
 # which is bean's tuned table — D-032). Safe-area insets shift it a little; the
 # hit radius is the drawn radius x 1.25, so the nominal point is well inside it
 # and a MISS here is a real layout regression.
 FIRE_X=$(python3 -c "print(int(0.8609*$W))")
-FIRE_Y=$(python3 -c "print(int(0.7548*$H))")
+FIRE_Y=$(python3 -c "print(int(0.7240*$H))")
 HIT="$(bridge "tap $FIRE_X $FIRE_Y")"
 echo "  tap $FIRE_X,$FIRE_Y -> $HIT"
 case "$HIT" in

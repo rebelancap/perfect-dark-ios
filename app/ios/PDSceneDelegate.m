@@ -71,6 +71,7 @@
 #import "PDShell.h"
 #import "PDTouchOverlay.h"
 #import "PDWatchdog.h"
+#import "PDGeometry.h"
 
 #if !TARGET_OS_VISION
 
@@ -110,7 +111,29 @@
 	// Cheap, idempotent, and the moment a window that missed the graft at
 	// connect time (SDL's, which does not exist yet then) would be visible.
 	pdGraftSDLWindows();
+	pdGeoCheckpoint("scene active");
 }
+
+/**
+ * UIKit moved the scene's coordinate space: a rotation, or a presented
+ * controller that asked for an orientation the scene then took. Logged with
+ * the whole size chain (D-077); on this landscape-only iPhone app it should
+ * never say portrait.
+ */
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#pragma clang diagnostic ignored "-Wdeprecated-implementations"
+- (void)windowScene:(UIWindowScene *)windowScene
+	didUpdateCoordinateSpace:(id<UICoordinateSpace>)previousCoordinateSpace
+	interfaceOrientation:(UIInterfaceOrientation)previousInterfaceOrientation
+	traitCollection:(UITraitCollection *)previousTraitCollection
+{
+	(void)previousCoordinateSpace;
+	(void)previousTraitCollection;
+	pdGeoSceneCoordinateSpaceChanged((long)previousInterfaceOrientation,
+		(long)windowScene.interfaceOrientation);
+}
+#pragma clang diagnostic pop
 
 @end
 

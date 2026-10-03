@@ -34,6 +34,7 @@ NSString *const PDDefShowFPS          = @"pd.video.showFPS";
 NSString *const PDDefHide60On120      = @"pd.video.hide60on120";
 
 NSString *const PDDefXblaWholeRelease = @"pd.xbla.wholeRelease";
+NSString *const PDDefXblaGoldenEye    = @"pd.xbla.goldenEye";
 NSString *const PDDefTexturePacks     = @"pd.texpacks.enabled";
 
 NSString *const PDDefAudioSessionMode  = @"pd.audio.sessionMode";
@@ -102,6 +103,9 @@ void PDDefaultsRegister(void)
 
 		// D-011: the XBLA release is on whenever a package is present.
 		PDDefXblaWholeRelease: @YES,
+		// D-081: GoldenEye's release is on whenever it is there, as it was
+		// before the switch came back (D-072); off is the player's choice.
+		PDDefXblaGoldenEye: @YES,
 		PDDefTexturePacks: @YES,
 
 		// "Lower Other Audio" - bean's default and the family's (D-033): a
@@ -340,6 +344,18 @@ void PDDefaultsApplyToEngine(void)
 		pdSetInt("Mod.XblaFont", on);
 		pdSetInt("Mod.XblaExplosions", on);
 	}
+	// GoldenEye XBLA's switch (D-081). The engine reads it ONCE a run, at
+	// startup and from pd.ini (overlay 0050: the Combat Simulator's pool is
+	// built from the release then), so pd.ini is written the moment it moves:
+	// a swipe-kill after flipping the row must not lose it. A pd.ini carried
+	// over from 1.0.0 (whose pin still had this key, default 0) is put right
+	// here too, on the first frame - it would cost that one launch only.
+	if (pdSetInt("Mod.XblaGoldenEye", PDDefBool(PDDefXblaGoldenEye) ? 1 : 0)) {
+		configSave("$S/pd.ini");
+		NSLog(@"perfectdark: [geplus] Mod.XblaGoldenEye=%d written to pd.ini (this run: %d, takes effect next launch)",
+			PDDefBool(PDDefXblaGoldenEye) ? 1 : 0, gebeanSwitchIsOn());
+	}
+
 	// Same rule: xblaSwitchSetEnabled() reloads meshes and rooms, and
 	// texpackSetLoadEnabled() drops replacements - neither is free, and neither
 	// is asked for when the answer is already what it is.

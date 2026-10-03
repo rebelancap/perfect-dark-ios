@@ -65,6 +65,39 @@ typedef NS_ENUM(NSInteger, PDXblaKind) {
 /** Documents/added-content, created if it is not there. The engine makes it too (fs.c). */
 + (NSString *)dropDir;
 
+/**
+ * Copy `src` over `dst` without ever putting what is already at `dst` at risk
+ * (D-075). The copy goes to a hidden temporary name beside `dst` first
+ * (".pd-adding-<uuid>.partial", which every scan - the engine's and the
+ * shell's - passes over because of its leading dot), and only a copy that
+ * finished is renamed over `dst`, atomically. On any failure the temporary
+ * file is removed and `dst` is exactly as it was.
+ *
+ * When `src` and `dst` are already the same file nothing is touched: the result
+ * is YES and `*same` (if given) is set.
+ */
++ (BOOL)copyFileSafely:(NSString *)src
+                    to:(NSString *)dst
+                  same:(BOOL *_Nullable)same
+                 error:(NSError *_Nullable *_Nullable)err;
+
+/**
+ * Remove the temporary files of copies that never finished (the app was killed
+ * mid-copy) from added-content/ and Documents. Main thread, at launch, before
+ * anything can be copying.
+ */
++ (void)sweepPartialCopies;
+
+#ifndef PD_PUBLIC
+/**
+ * Test hook for the bridge (`adopt fail copy|swap|off`): the NEXT
+ * +copyFileSafely:… fails at that stage. "copy" leaves a half-written temporary
+ * file and reports ENOSPC, as a copy that ran out of space would; "swap" lets
+ * the copy finish and refuses the rename. Compiled out of public builds.
+ */
++ (void)failNextCopyAt:(nullable NSString *)stage;
+#endif
+
 /** Caches/xbla — where patch 0009 routes the engine's cache/ to. */
 + (NSString *)cacheDir;
 
@@ -133,6 +166,95 @@ typedef NS_ENUM(NSInteger, PDXblaKind) {
  * fresh scan, whether or not anything was picked.
  */
 + (void)presentImporterFrom:(UIViewController *)vc done:(void (^_Nullable)(PDXblaFind *))done;
+
+/**
+ * The importer's own copy: `url` into added-content/ under its own name,
+ * replacing a file of that name only once the copy is complete (D-075).
+ * Returns the path, or nil with `err` set and nothing changed. Public so the
+ * bridge's `xbla pick <path>` can drive exactly this path on a simulator.
+ */
++ (nullable NSString *)adoptPickedURL:(NSURL *)url error:(NSError *_Nullable *_Nullable)err;
+
+@end
+
+// ---------------------------------------------------------------------------
+// GE Plus's two optional files, which share added-content/ with the release
+// above (D-071, D-072). The engine finds both by their contents, at startup:
+//
+//   * a GoldenEye 007 (US) N64 ROM - port/src/gexplusrom.c, top level of
+//     added-content/ (or the base dir, from which it is moved in), 12 MB,
+//     header and CRCs checked by geconvertHeaderIsGoldenEyeUs();
+//   * the GoldenEye XBLA release - port/src/gebean.c, a folder holding
+//     files/new/char, or a .7z/.zip with an entry under files/new/char/; or
+//     (overlay 0046) the same release as the Xbox 360 package (STFS, title
+//     584108A9), bare, in a folder, or in a .7z/.zip - four levels deep in
+//     added-content/ (then the legacy xbla/).
+//
+// What changes takes effect at the NEXT launch: the conversion and the unpack
+// run before the menus exist (main.c), and an iOS app cannot restart itself.
+
+typedef NS_ENUM(NSInteger, PDGoldenEyeKind) {
+	PDGoldenEyeRom = 0,
+	PDGoldenEyeXbla = 1,
+};
+
+@interface PDGoldenEyeFind : NSObject
+@property (nonatomic) PDGoldenEyeKind kind;
+@property (nonatomic, copy, nullable) NSString *path;          // absolute
+@property (nonatomic, copy, nullable) NSString *relativePath;  // under added-content/
+@property (nonatomic) unsigned long long bytes;                // 0 for a folder
+@property (nonatomic) BOOL isFolder;                           // an unpacked release
+@property (nonatomic) BOOL isPackage;                          // the Xbox 360 package form (bare, in a folder or archive)
+/** MB the engine's last unpack needed and did not find, and MB that were free (0 = no refusal). */
+@property (nonatomic) int needMb;
+@property (nonatomic) int freeMb;
+/** The game has already made what it needs from it (arenas converted / release unpacked). */
+@property (nonatomic) BOOL ready;
+@property (nonatomic, readonly) BOOL found;
+/** One line for the settings row: "name (12 MB), ready" or "none in Documents/added-content". */
+@property (nonatomic, readonly) NSString *rowText;
+@end
+
+@interface PDXbla (GoldenEye)
+
+/**
+ * The last GoldenEye scan, or nil while the first one is still running. The
+ * scan reads ROM headers and archive directories, so it never runs on the main
+ * thread: +warmGoldenEyeScan: starts it on a background queue at launch and
+ * after every import, and the settings page shows "checking…" until it lands.
+ */
++ (nullable PDGoldenEyeFind *)cachedGoldenEye:(PDGoldenEyeKind)kind;
+
+/** Rescan both in the background; `done` runs on the main thread. */
++ (void)warmGoldenEyeScan:(void (^_Nullable)(void))done;
+
+/**
+ * What the picked file is, in plain words, against the kind the row asked for.
+ * nil = it is the right thing. Never touches added-content/.
+ */
++ (nullable NSString *)goldenEyeProblemWithFile:(NSString *)path expecting:(PDGoldenEyeKind)kind;
+
+/**
+ * The Files picker for one of the two, through the same machinery as the
+ * release's importer. `done` runs on the main thread with a title and a
+ * message for the player (nil title = the picker was cancelled).
+ */
++ (void)presentGoldenEyeImporter:(PDGoldenEyeKind)kind
+                            from:(UIViewController *)vc
+                            done:(void (^)(NSString *_Nullable title, NSString *message))done;
+
+/**
+ * The picker's own completion: validate `url`, and only if it is the right
+ * thing copy it into added-content/, replacing the file of the same kind that
+ * was there. Public so the bridge can drive exactly this path on a simulator,
+ * where the real picker cannot be operated by injected touches.
+ */
++ (void)adoptGoldenEye:(PDGoldenEyeKind)kind
+             pickedURL:(NSURL *)url
+                  done:(void (^)(NSString *_Nullable title, NSString *message))done;
+
+/** `ge_*` lines for the bridge. Uses the cached scan; no I/O. */
++ (NSString *)goldenEyeStateLines;
 
 @end
 

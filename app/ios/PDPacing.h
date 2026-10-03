@@ -168,6 +168,14 @@ typedef struct {
 void pdPacingSnapshot(PDPacingSnap *out);
 
 /**
+ * 1 while the app may draw and present; 0 from didEnterBackground until
+ * willEnterForeground (-suspend / -resume). For the loops that draw without the
+ * pacer's wait - GE Plus's startup notices (overlay 0042, D-075) - which must
+ * not start a frame at all while it is 0. Game thread.
+ */
+int pdIosPresentAllowed(void);
+
+/**
  * One external clock tick: the compositor has reached this frame's optimal
  * input time, so the game thread may draw (D-050).
  *

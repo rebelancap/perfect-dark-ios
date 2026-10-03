@@ -22,6 +22,7 @@ extern void *pdAngleGetHostView(void);
 #import "PDAudio.h"
 #import "PDSettingsViewController.h"
 #import "PDWatchdog.h"
+#import "PDGeometry.h"
 
 #include <stdatomic.h>
 #include <mach/mach.h>
@@ -345,6 +346,13 @@ int pdExtraPumpMs = 0;
 		// The AIM chip's whole claim, from the engine rather than from the
 		// shell's own mask (D-046).
 		[s appendFormat:@"player_aimmode=%d\n", playerIosGetAimMode()];
+		// The two chips of D-085, from the engine.
+		int gunfn = 0, amslot = 0;
+		const int gun = playerIosGunState(&gunfn);
+		const int amopen = playerIosActiveMenu(&amslot);
+		[s appendFormat:@"player_gun=%d\nplayer_gunfunc=%d\nplayer_gunhas2nd=%d\n"
+			@"player_ge_level=%d\nplayer_wheel=%d\nplayer_wheel_slot=%d\n",
+			gun, gunfn, playerIosGunHasSecondary(), playerIosOnGoldenEyeLevel(), amopen, amslot];
 	}
 	[s appendString:[PDPacing.shared report]];
 	// The 120 -> 60 bisect rows (D-044): what the ENGINE and the window layer
@@ -356,6 +364,8 @@ int pdExtraPumpMs = 0;
 		[s appendFormat:@"video_vsync=%d\n", videoGetVsync()];
 	}
 	[s appendFormat:@"graft_enabled=%d\n", pdGraftEnabled];
+	// Every link of the picture's size chain (D-077); empty on visionOS.
+	[s appendString:pdGeoStateLines()];
 #if TARGET_OS_VISION
 	// The 3D mode's own rows (Phase 6): whether the space is open, whether the
 	// compositor loop is alive, how many frames it has presented and at what
@@ -418,6 +428,15 @@ int pdGraftSDLWindows(void)
 	NSMutableArray<UIWindow *> *candidates = [NSMutableArray array];
 	if (host.window) {
 		[candidates addObject:host.window];
+	}
+	// The shell's own pre-engine windows (the onboarding screen, the "preparing"
+	// note) are made before the scene connects on a cold launch - there is no
+	// scene to give them yet - and a sceneless window is never drawn under the
+	// UIScene life cycle: the first-launch onboarding was a black screen (D-073).
+	// The scene's willConnect calls this, so they are grafted the moment it can be.
+	UIWindow *overlay = PDShell.shared.overlayWindow;
+	if (overlay && ![candidates containsObject:overlay]) {
+		[candidates addObject:overlay];
 	}
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -561,6 +580,9 @@ void pdIosFrameHook(void)
 #endif
 		[PDController.shared tick];
 		[PDTouchOverlay publishInput];
+		// The picture's size chain (D-077): logged on change, and on an iPhone
+		// a portrait-shaped game window is put back before this frame draws.
+		pdGeoFrame();
 		// The settings page, built once, a few seconds in (BUG 4 / D-041). It
 		// used to be built by the first gear tap, on this thread, in that
 		// frame: forty-odd cells with their switches, segmented controls and

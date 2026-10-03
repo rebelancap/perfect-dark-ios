@@ -2,12 +2,14 @@
 #import "PDAudio.h"
 #import "PDDefaults.h"
 #import "PDShell.h"
+#import "PDPacing.h"
 
 #import <AVFoundation/AVFoundation.h>
 #import <UIKit/UIKit.h>
 
 #include <stdatomic.h>
 #include <math.h>
+#include <SDL_timer.h>
 
 // How far the game drops in "Lower Game Audio" while the other app plays.
 // bean's number (audio_session_uikit.mm), and there is no reason for two ports
@@ -157,6 +159,45 @@ static void pdApplySpatial(void)
 }
 #endif
 
+// The stalled-device watch (overlay 0048). Restarts asked for, and the last log.
+static int sKicks;
+static int sKickLogged;
+static unsigned int sKickAt;
+
+/**
+ * An audio interruption pauses SDL's AudioQueue, and SDL starts it again only
+ * on the interruption's end or on the app becoming active - once; if that
+ * AudioQueueStart fails (the session not active again yet) nothing retries, and
+ * the game is silent while it keeps pushing. The engine says so: its burst drop
+ * (overlay 0023) has lasted far longer than a device that plays ever lets it.
+ * Then, with the app in the foreground and the session active, SDL is handed
+ * the interruption's end once more - its own restart path, nothing else
+ * listens for it from this session - at most every three seconds. On resume the
+ * device plays the queue down and the engine resyncs once.
+ */
+static void pdKickStalledDevice(AVAudioSession *s)
+{
+	const unsigned int now = SDL_GetTicks();
+	if (!g_PdAudioDropping || now - g_PdAudioDroppingSinceMs < 2000 || !pdIosPresentAllowed()
+	    || (sKickAt && now - sKickAt < 3000)) {
+		return;
+	}
+	NSError *err = nil;
+	if (![s setActive:YES error:&err]) {
+		sLastError = err.localizedDescription;
+		return;   // still interrupted (a call): the next tick asks again
+	}
+	sKickAt = now;
+	sKicks++;
+	if (sKickLogged < 5) {
+		sKickLogged++;
+		NSLog(@"perfectdark: [audio] the device has not played for %u ms - restarting it (%d)",
+			now - g_PdAudioDroppingSinceMs, sKicks);
+	}
+	[NSNotificationCenter.defaultCenter postNotificationName:AVAudioSessionInterruptionNotification
+		object:s userInfo:@{ AVAudioSessionInterruptionTypeKey : @(AVAudioSessionInterruptionTypeEnded) }];
+}
+
 /** Set the category and options if they are not already ours. PDAudio's queue. */
 static void pdApplySessionMode(void)
 {
@@ -260,6 +301,7 @@ static void pdApplySessionMode(void)
 			// notification firing (it only fires for primary-audio changes we
 			// are secondary to).
 			pdRecomputeDuck(s);
+			pdKickStalledDevice(s);
 #if TARGET_OS_VISION
 			// ...and the spatial intent, every second: SDL drops it whenever it
 			// re-opens the device and says nothing (plan §2.7).
@@ -330,6 +372,9 @@ static void pdApplySessionMode(void)
 		 "audio_have_freq=%d\naudio_have_samples=%d\naudio_have_channels=%d\n"
 		 "audio_have_format=%#x\naudio_buffer_size=%d\naudio_queue_limit=%d\n"
 		 "audio_prime_samples=%d\naudio_out_samples=%d\naudio_rate_milli=%d\n"
+		 "audio_rate_min_milli=%d\naudio_rate_max_milli=%d\naudio_resync_underrun=%d\n"
+		 "audio_resync_burst=%d\naudio_dropped_samples=%d\n"
+		 "audio_dropping=%d\naudio_dropping_ms=%u\naudio_device_restarts=%d\n"
 #if TARGET_OS_VISION
 		 "audio_spatial_immersive=%d\naudio_spatial_experience=%d\n"
 		 "audio_spatial_applied=%d\naudio_spatial_error=%@\n"
@@ -346,7 +391,10 @@ static void pdApplySessionMode(void)
 		g_PdAudioSilence, g_PdAudioPushSamples,
 		g_PdAudioHaveFreq, g_PdAudioHaveSamples, g_PdAudioHaveChannels,
 		(unsigned)g_PdAudioHaveFormat, g_PdAudioBufferSize, g_PdAudioQueueLimit,
-		g_PdAudioPrimeSamples, g_PdAudioOutSamples, g_PdAudioRateMilli
+		g_PdAudioPrimeSamples, g_PdAudioOutSamples, g_PdAudioRateMilli,
+		g_PdAudioRateMinMilli, g_PdAudioRateMaxMilli, g_PdAudioResyncUnder,
+		g_PdAudioResyncOver, g_PdAudioDroppedSamples,
+		g_PdAudioDropping, g_PdAudioDropping ? SDL_GetTicks() - g_PdAudioDroppingSinceMs : 0u, sKicks
 #if TARGET_OS_VISION
 		, sImmersive, (int)s.intendedSpatialExperience, sSpatialApplied,
 		sSpatialError ?: @"-"
@@ -370,6 +418,11 @@ static void pdApplySessionMode(void)
 	g_PdAudioDrops = 0;
 	g_PdAudioReprimes = 0;
 	g_PdAudioSilence = 0;
+	g_PdAudioResyncUnder = 0;
+	g_PdAudioResyncOver = 0;
+	g_PdAudioDroppedSamples = 0;
+	g_PdAudioRateMinMilli = g_PdAudioRateMilli;
+	g_PdAudioRateMaxMilli = g_PdAudioRateMilli;
 }
 
 @end

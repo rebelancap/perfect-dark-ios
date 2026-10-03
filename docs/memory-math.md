@@ -127,6 +127,38 @@ a second eye render target — at 1280x720-equivalent that is tens of MB, but it
 is unmeasured), and third-party texture packs such as PD Plus HD, which are
 author-sized and can be arbitrarily large.
 
+## GE Plus (added at c18645860, measured 2026-10-02, M-049)
+
+GoldenEye's levels converted from the player's ROM, drawn with the GoldenEye XBLA
+release's HD art, are the heaviest scenes measured so far on art residency:
+
+| scene (oracle, 844x390) | peak footprint | delta over title |
+|---|---|---|
+| title | 310 MB | — |
+| Dam mission, N64 look | 313 MB | +3 MB |
+| **Dam mission, HD look** | **595 MB** | **+285 MB** |
+| Temple arena, HD, 8 simulants | 368 MB | +58 MB |
+| Facility mission, HD | 377 MB | +67 MB |
+
+Dam HD is the outdoor level with the release's HD terrain, trees and water all
+resident, and +285 MB is about 2.4x Chicago's XBLA delta (+118). It is still
+below N64-art-at-8x (+341) and the budget verdict above does not change: on the
+tightest plausible ceiling (~1.4 GB on a 4 GB phone) a device that bills, say,
+~350 MB for an ordinary Perfect Dark scene lands near 650 MB in Dam HD. **The
+increased-memory-limit entitlement is still not needed**, but this is the scene a
+first device measurement should be taken in. Disk: 20 MB of converted arenas in
+Caches/mods and 395 MB of unpacked release in Caches/cache/xbla/goldeneye, both
+regenerable.
+
+**The package form (D-079, M-051).** The Xbox 360 package (739 MB) inside the user's
+262 MB solid `.7z` is decoded as a stream straight into the same 395 MB cache: no copy of
+the package is ever on disk or in memory. Peak during the unpack: +43 MB over idle on the
+oracle (the 32 MB LZMA2 dictionary, a 1 MB piece, a ~2.4 MB block list); whole-process
+phys_footprint peak 52 MB on lane 3, 80 MB on the Vision Pro simulator. Disk: the user's
+262 MB `.7z` stays in Documents; Caches grows straight to 395 MB, nothing transient. The
+free-space check asks for 457 MB. Only a package whose files are not stored in order
+(none in this release) would be spooled whole first: +739 MB transient.
+
 ## Recommended iOS defaults
 
 | setting | default | why |

@@ -90,6 +90,11 @@ extern NSString *const PDDefHide60On120;       // bool
 // The F6 equivalent, and the only XBLA switch there is (D-032): all five parts
 // follow it. Five separate rows were five ways to half-apply one release.
 extern NSString *const PDDefXblaWholeRelease;  // bool
+// GoldenEye XBLA's own switch (D-081, overlay 0050): engine key
+// Mod.XblaGoldenEye. Off is GE Plus in GoldenEye's N64 look, as if the release
+// were not in added-content/. Read by the engine once a run, so it takes effect
+// the next time the app opens; ON by default.
+extern NSString *const PDDefXblaGoldenEye;     // bool
 extern NSString *const PDDefTexturePacks;      // bool
 
 // Audio (D-033). The game's OWN audio settings - "Sound", "Music" and "Sound

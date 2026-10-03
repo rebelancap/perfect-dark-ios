@@ -35,6 +35,7 @@
 #import "PDTouchOverlay.h"
 #import "PDController.h"
 #import "PDVision.h"
+#import "PDWatchdog.h"
 
 // port/include/input.h — the public bind API, declared here rather than in
 // PDShell.h because taking R3 off the combat roll (D-037) is this file's
@@ -171,6 +172,19 @@ static void pdUnbindRollFromR3(void)
 		any ? [NSString stringWithFormat:@" (%@)", GCController.controllers.firstObject.vendorName ?: @"?"] : @"");
 
 	PDTouchOverlay.current.padConnected = any;
+	// D-084: one lifecycle.txt line per connect/disconnect. A phone report of
+	// "the touch controls did not hide" could not be answered from a devicectl
+	// pull - this file had no pad lines - and the answer turned out to be the
+	// On-screen controls row set to On (always), not anything the pad did.
+	{
+		static const char *modes[] = { "auto", "on", "off" };
+		const NSInteger mode = PDDefInt(PDDefTouchMode);
+		PDTouchOverlay *ov = PDTouchOverlay.current;
+		PDLifecycle("pad %s: %lu GCController(s), touch mode %s, overlay %s",
+			any ? "connected" : "absent", (unsigned long)GCController.controllers.count,
+			(mode >= 0 && mode <= 2) ? modes[mode] : "?",
+			!ov ? "not installed" : (ov.hidden ? "hidden" : "visible"));
+	}
 
 	if (any && !_unbound) {
 		_unbound = YES;

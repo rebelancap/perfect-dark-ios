@@ -92,6 +92,18 @@ entirely the wrong reason. If it truly cannot bind it says
 | `xbla wait [N]` | blocks until the one-time unpack has finished (default 600 s), then reports how long it took. This is the gate's hook: the unpack is a quarter of a gigabyte on a background thread **before the engine starts** (D-020), and polling the container path from the host races the app's own writes. Answers at once for a bare package (nothing to unpack) and `ERR` when there is no package at all |
 | `texpack` | what is in `Documents/texture-packs`, whether each folder carries the `bottomup.txt` row-order marker, and which pack the engine has selected. The marker is the whole difference between a pack and an upside-down one (D-024) and is invisible in a screenshot of anything symmetrical |
 | `xbla release <on\|off>` | flips the whole-release row **through the settings page's own code path** (`PDSettingsViewController setSwitchRow:`), so a scripted check of "does that row do anything" is a check of the row. Reports what was asked for and what `xblaSwitchGetEnabled()` says afterwards |
+| `xbla pick <path>` | the Xbox 360 row's (and the onboarding's) importer copy with a file already in the container: copy beside, then rename over (D-075). Answers `xbla_pick=ok dst=…` or `xbla_pick=FAILED why=…` |
+| `geplus [scan]` / `geplus pick <rom\|xbla> <path>` | the GoldenEye rows: the cached scan, a fresh one, or the picker's completion (validation, copy, replace, alert) with a file in the container |
+| `geplus` lines (1.0.1.3) | besides `ge_*_found/file/ready/row`: `ge_xbla_form=none\|folder\|archive\|package` (package = the Xbox 360 package, bare, in a folder or in a .7z/.zip) and `ge_xbla_need_mb` (MB the last start needed to unpack and did not find; 0 = no refusal). The free-space check can be faked in a dev build with `PD_FAKE_FREE_MB=<n>` in the launch environment (`SIMCTL_CHILD_PD_FAKE_FREE_MB=100 xcrun simctl launch …`); public builds ignore it |
+| `audio interrupt begin\|end` | posts the audio session's interruption notification the way the system does for a call or Siri: `begin` makes SDL pause its AudioQueue. Leaving out `end` is the lost-end case: the engine's burst drop then lasts past 2 s and the shell restarts the device itself (overlay 0048). `audio` reports `audio_dropping`, `audio_dropping_ms` and `audio_device_restarts` |
+| `adopt fail <copy\|swap\|off>` | the NEXT copy into `added-content/` (either picker) fails at that stage: `copy` leaves half a temporary file and reports ENOSPC, `swap` refuses the rename. The proof that a failed replace leaves the existing file as it was (D-075) |
+| `stall <ms>` / `stall every <s> <ms>` / `stall off` | blocks the GAME thread for that long (once, or on a repeat from a helper thread) - a deterministic hitch. The audio measurements of D-078/M-050 are this plus `audio trace`. 1-5000 ms |
+| `audio trace on\|off\|dump [name]` | the per-push audio ring (overlay 0023, 16,384 rows ≈ 4.5 min): `push,us,queued,out,rate_milli,integ_e6,flags`, flags 1 underrun, 2 dropped at QueueLimit, 4 re-prime, 8 dropped in a burst resync, 16 fade in, 32 fade out. `dump` writes `Documents/<name>` (default `audio-trace.csv`); `on` empties the ring |
+| `geo` / `geo repair on\|off\|now` | the picture's size chain (D-077): scene orientation and bounds, SDL's window/root/Metal view, the layer, the EGL surface the renderer draws at, SDL's size, `statusBarOrientation`, which window is key, and what SDL's controller and the app allow. `repair off` disables the iPhone repair so the fault can be reproduced (also `PD_GEO_REPAIR=0` in the launch environment); `repair now` runs the check at once. Since 1.0.1.3 it also reports `size_repair_streak` (repairs in a row with no good frame between) and `size_repair_gave_up` (1 after 30: no more repairs that session); lifecycle.txt keeps the first 10 repair and 200 size-change lines in full, then one summary line a minute |
+| `geo keyboard` | raises a real keyboard from the key window's top page for 3 s - what the Files picker's search field does to every window in the app |
+| `geo device <1\|3\|4>` | sets `UIDevice.orientation` by KVC. Kept as a recorded dead end: under UIScene it does NOT rotate anything |
+| `presented` | every window of every scene, the controllers presented in each and the orientations each supports |
+| `picker cancel` / `picker pick <path>` / `picker dismiss` | finish the REAL document picker (opened with `settings row …`) the way a finger does: it goes away, then its delegate hears cancelled or picked-with-that-file. `dismiss` closes whatever is on top (an alert, as if OK) |
 | `quit` | `configSave()` then `exit(0)` — which is also the only way to end a scripted run with its settings written (`atexit(cleanup)`, `main.c:124`) |
 
 ### Why `tap` exists at all
@@ -125,6 +137,10 @@ xbla_extracted=0|1                the .extracted marker AND a package under it
 xbla_unpacking=0|1  xbla_unpack_pct=<0-100|-1>  xbla_unpack_secs=<last unpack>
 xbla_cache=<Caches/cache/xbla>    where patch 0009's $C sent it
 audio_category=...  audio_route=...  audio_rate=...  audio_outchannels=...
+audio_rate_min_milli / audio_rate_max_milli   the ratio's excursion since `audio reset` (x10000; D-078 keeps it within 9900-10100)
+audio_resync_underrun / audio_resync_burst / audio_dropped_samples   hitches handled as discontinuities (D-078)
+size_scene / size_window / size_root / size_view / size_layer / size_layer_drawable / size_egl / size_sdl
+size_portrait_frames / size_repairs / size_changes / size_sdl_resizes / size_last_*   the size chain (D-077); iOS only
 audio_applied=<n>                 times the .playback category had to be set
 drawable=844x390                  what ANGLE is actually rendering
 points=844x390  contents_scale=3.00
@@ -146,6 +162,10 @@ pacing_links / pacing_presents / pacing_dropped / pacing_hz / pacing_target
 pacing_wait_mode=runloop|sem      how the game thread waits for the link (D-045)
 pacing_wake_us_p50/p95/max        link signal -> waiter noticing, microseconds
 settings_page=0|1
+present_allowed=0|1               0 from didEnterBackground to willEnterForeground
+notice_drawn / notice_held        GE Plus startup notice frames drawn / calls held
+                                  in the background (overlay 0042, D-075)
+egl_swaps=<n>                     eglSwapBuffers on the window surface since launch
 ```
 
 ### The round-S instruments (D-044)

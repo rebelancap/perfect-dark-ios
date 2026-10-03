@@ -7,6 +7,8 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+@class PDVision3DRows;
+
 @interface PDSettingsViewController : UITableViewController
 
 /** Show it (main thread). Idempotent. */
@@ -70,6 +72,25 @@ NS_ASSUME_NONNULL_BEGIN
 
 /** Scroll the page to the section whose title contains `needle`. */
 + (void)scrollToSectionContaining:(NSString *)needle;
+
+/**
+ * The GoldenEye rows' picker completion, driven from the bridge with a file the
+ * simulator holds (the real Files picker cannot be operated by injected touches).
+ * Same validation, copy and alert as a real pick.
+ */
++ (void)goldenEyePicked:(NSInteger)kind url:(NSURL *)url;
+
+/** Scroll THIS page to row `row` of the section whose title contains `needle`
+ *  ("3D" is the 3D section on visionOS). Main thread. */
+- (void)scrollToSection:(NSString *)needle row:(NSInteger)row;
+
+#if TARGET_OS_VISION
+/**
+ * D-082: on visionOS the page ends with the 3D rows, one section under a
+ * "3D Settings | Reset" header — the iOS sections first, then this.
+ */
+@property (nonatomic, readonly, nullable) PDVision3DRows *rows3d;
+#endif
 
 @end
 

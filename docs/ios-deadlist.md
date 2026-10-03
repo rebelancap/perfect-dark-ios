@@ -276,3 +276,20 @@ built) and new menu rows (33 new handlers in `optionsmenu.c`).
 | Recast/Detour (simulant navmesh, `Mod.SimBrain`) | `port/src/external/recastnavigation`, `simnav*.cpp` | **KEEP**: plain C++, builds for all four slices |
 | HDiffPatch (GoldenEye XBLA CE updater the player supplies) | `port/src/external/hdiffpatch` | **KEEP**: file I/O only |
 | Language packs | `lang/`, `tools/langpack/build.py` at build time | **KEEP**: embedded at build time by host Python |
+
+## 14. GE Plus on iOS (checked 2026-10-02, 1.0.1.1)
+
+GE Plus (GoldenEye 007 from the player's own ROM, and the GoldenEye XBLA release's
+HD art) was run end to end on the lane-3 and Vision Pro simulators. Nothing in it
+reaches for a subprocess, a file dialog, a download or a keyboard-only prompt; its
+folder screens, intro and watch menu work with the touch pointer (D-022) and the
+pad. What changed for iOS:
+
+| what | where | disposition |
+|---|---|---|
+| Startup conversion / GoldenEye XBLA unpack / CE patch notices | `gexplusrom.c` `gexPlusRomNotice()`, called in a loop on the game (= main) thread | **SEAM** (0042): one `SDL_PumpEvents()` per notice frame so the app answers resign/background during a multi-second wait |
+| Converted arenas | `gexplusrom.c` containers, `mod.c` `modListRefresh()` | **SEAM** (0043): `$C/mods` (Caches) first; an older `Documents/mods` copy is still used |
+| GE Plus's crosshair in 3D | `sight.c` GE branch returns before the D-064 span | **SEAM** (0044, visionOS 3D only) |
+| GE Plus's folder screens in 3D | `menu.c` calls `gexFrontRender()` before the flat span | **SEAM** (0045, visionOS 3D only) |
+| "Needs a GoldenEye 007 (US) ROM in added-content/, then restart." | `mainmenu.c` GE Plus status label | **KEEP**: true on iOS too (close and reopen); the settings rows say "the next time you open the app" |
+| Asset dump of GoldenEye's models | `assetdump.c` | already hidden with Dump All Assets |

@@ -20,6 +20,10 @@
 //     and is not called `ext_tex`, because a pack that reaches a phone was
 //     built for an emulator or the VR fork — the only packs in the port's own
 //     row order are its own dumps, and Dump All Assets is on the iOS deadlist;
+//     EXCEPT a Plus HD pack from v0.10 on (Ultimate / XBLA / Forever Plus HD),
+//     which is stored the right way up and which Community Packs leaves
+//     unmarked on purpose - marking one turns every texture over (D-090), so
+//     those are skipped and a marker of OURS found in one is removed;
 //   * select a pack if one is present and none is selected, since a player who
 //     dropped a pack into Files has already said what they want.
 //

@@ -110,6 +110,16 @@ static NSString *const kRomFileName = @"pd.ntsc-final.z64";
 		return c;
 	}
 
+	// GoldenEye 007 is the one other N64 ROM this app has a use for (GE Plus),
+	// and the one a player is most likely to pick here by mistake.
+	if (!memcmp(h + 0x20, "GOLDENEYE", 9)) {
+		c.verdict = PDRomNotARom;
+		c.explanation = @"That is GoldenEye 007, not Perfect Dark. GoldenEye is an optional extra "
+		                 "for GE Plus and goes in the added-content folder — but Perfect Dark's own "
+		                 "ROM is needed first.";
+		return c;
+	}
+
 	if (size != kRomSize) {
 		c.verdict = PDRomWrongSize;
 		c.explanation = [NSString stringWithFormat:
@@ -349,18 +359,52 @@ static NSString *const kRomFileName = @"pd.ntsc-final.z64";
 
 	[self refreshXbla];
 
+	// The other optional extras, in one plain sentence: GE Plus (D-072). No
+	// button here - the screen is about the one file the game cannot start
+	// without, and the settings page has the GoldenEye rows.
+	UILabel *ge = [UILabel new];
+	ge.numberOfLines = 0;
+	ge.font = [UIFont systemFontOfSize:14];
+	ge.textColor = [UIColor colorWithWhite:0.72 alpha:1.0];
+	ge.text = @"Also optional: your own GoldenEye 007 (US) N64 ROM, and the GoldenEye XBLA "
+	           "release (its .7z or .zip, or its Xbox 360 package), in the same added-content "
+	           "folder under any name. With them, "
+	           "GoldenEye's missions and arenas are playable as GE Plus in the Perfect Menu. "
+	           "They can be added later from Settings too.";
+
 	UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:
-		@[ title, body, _status, pick, _xbla, _xblaPick ]];
+		@[ title, body, _status, pick, _xbla, _xblaPick, ge ]];
 	stack.axis = UILayoutConstraintAxisVertical;
 	stack.spacing = 14;
 	stack.translatesAutoresizingMaskIntoConstraints = NO;
-	[self.view addSubview:stack];
+
+	// In a scroll view: on a landscape phone the screen is 390 points tall and
+	// the text is taller than that, which clipped the title off the top and the
+	// last paragraph off the bottom. Centred when it fits, scrollable when not.
+	UIScrollView *scroll = [UIScrollView new];
+	scroll.translatesAutoresizingMaskIntoConstraints = NO;
+	scroll.alwaysBounceVertical = NO;
+	[scroll addSubview:stack];
+	[self.view addSubview:scroll];
 
 	UILayoutGuide *safe = self.view.safeAreaLayoutGuide;
+	UILayoutGuide *content = scroll.contentLayoutGuide;
+	UILayoutGuide *frame = scroll.frameLayoutGuide;
+	// content height = max(the screen, the text + margins); the text centred in it
+	NSLayoutConstraint *fit = [content.heightAnchor constraintEqualToAnchor:frame.heightAnchor];
+	fit.priority = UILayoutPriorityDefaultLow;
 	[NSLayoutConstraint activateConstraints:@[
-		[stack.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:28],
-		[stack.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-28],
-		[stack.centerYAnchor constraintEqualToAnchor:safe.centerYAnchor],
+		[scroll.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor],
+		[scroll.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor],
+		[scroll.topAnchor constraintEqualToAnchor:safe.topAnchor],
+		[scroll.bottomAnchor constraintEqualToAnchor:safe.bottomAnchor],
+		[stack.leadingAnchor constraintEqualToAnchor:content.leadingAnchor constant:28],
+		[stack.trailingAnchor constraintEqualToAnchor:content.trailingAnchor constant:-28],
+		[stack.widthAnchor constraintEqualToAnchor:frame.widthAnchor constant:-56],
+		[content.heightAnchor constraintGreaterThanOrEqualToAnchor:frame.heightAnchor],
+		[content.heightAnchor constraintGreaterThanOrEqualToAnchor:stack.heightAnchor constant:32],
+		[stack.centerYAnchor constraintEqualToAnchor:content.centerYAnchor],
+		fit,
 	]];
 }
 
@@ -368,6 +412,26 @@ static NSString *const kRomFileName = @"pd.ntsc-final.z64";
 {
 	[super viewDidAppear:animated];
 	NSLog(@"perfectdark: [onboard] presented, view frame=%@", NSStringFromCGRect(self.view.frame));
+	for (UIView *v in self.view.subviews) {
+		if ([v isKindOfClass:UIScrollView.class]) {
+			UIScrollView *sv = (UIScrollView *)v;
+			UIStackView *st = sv.subviews.firstObject;
+			NSLog(@"perfectdark: [onboard] scroll frame=%@ content=%@ stack=%@",
+				NSStringFromCGRect(sv.frame), NSStringFromCGSize(sv.contentSize),
+				NSStringFromCGRect(st.frame));
+			// Test hook: a simulator cannot scroll this by injected touch, so a
+			// capture of the last paragraph launches with this set.
+			if (NSProcessInfo.processInfo.environment[@"PD_ONBOARD_SCROLL_END"]) {
+				[sv setContentOffset:CGPointMake(0, MAX(0, sv.contentSize.height - sv.bounds.size.height))
+				            animated:NO];
+			}
+			if ([st isKindOfClass:UIStackView.class]) {
+				UILabel *last = (UILabel *)st.arrangedSubviews.lastObject;
+				NSLog(@"perfectdark: [onboard] GE Plus note frame in window=%@",
+					NSStringFromCGRect([last convertRect:last.bounds toView:nil]));
+			}
+		}
+	}
 }
 
 - (void)pickFile
@@ -409,8 +473,9 @@ static NSString *const kRomFileName = @"pd.ntsc-final.z64";
 
 	NSString *dst = [PDShell.shared.documentsPath stringByAppendingPathComponent:kRomFileName];
 	NSError *err = nil;
-	[NSFileManager.defaultManager removeItemAtPath:dst error:NULL];
-	BOOL ok = [NSFileManager.defaultManager copyItemAtPath:url.path toPath:dst error:&err];
+	// Copied beside the name and renamed over it only once complete (D-075): a
+	// copy that fails part-way leaves whatever was at that name as it was.
+	BOOL ok = [PDXbla copyFileSafely:url.path to:dst same:NULL error:&err];
 	if (scoped) {
 		[url stopAccessingSecurityScopedResource];
 	}
