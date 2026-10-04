@@ -23,7 +23,7 @@ untouched; a replay run bypasses the pacer entirely on the shell side.
 Every other platform keeps upstream's limiter exactly as it was.
 
 diff --git a/port/fast3d/gfx_sdl2.cpp b/port/fast3d/gfx_sdl2.cpp
-index 6551e9b7b..4ab35e44b 100644
+index 4738da8a9..0eb8b0530 100644
 --- a/port/fast3d/gfx_sdl2.cpp
 +++ b/port/fast3d/gfx_sdl2.cpp
 @@ -23,6 +23,11 @@ extern "C" int pdAngleSetSwapInterval(int interval);
@@ -52,7 +52,7 @@ index 6551e9b7b..4ab35e44b 100644
      SDL_ShowWindow(wnd);
      qpc_freq = SDL_GetPerformanceFrequency();
      return;
-@@ -453,6 +464,19 @@ static inline void sync_framerate_with_timer(void) {
+@@ -462,6 +473,19 @@ static inline void sync_framerate_with_timer(void) {
  }
  
  static void gfx_sdl_swap_buffers_begin(void) {
@@ -72,7 +72,7 @@ index 6551e9b7b..4ab35e44b 100644
      if (target_fps) {
          sync_framerate_with_timer();
      }
-@@ -467,6 +491,7 @@ static void gfx_sdl_swap_buffers_begin(void) {
+@@ -476,6 +500,7 @@ static void gfx_sdl_swap_buffers_begin(void) {
          SDL_GL_SwapWindow(wnd);
  #endif
      }

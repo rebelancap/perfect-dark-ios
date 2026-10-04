@@ -41,7 +41,7 @@ so every other platform is byte for byte upstream's.
    bridge) records queue, ratio, integrator and every resync.
 
 diff --git a/port/src/audio.c b/port/src/audio.c
-index 791b5f8..63ed859 100644
+index 791b5f8ab..63ed859b0 100644
 --- a/port/src/audio.c
 +++ b/port/src/audio.c
 @@ -15,6 +15,408 @@ static s32 bufferSize = 512;

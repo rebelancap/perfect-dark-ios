@@ -13,10 +13,10 @@ an XBLA record at the 4096 cap makes that 1.2e-4 - below fp16's resolution
 next to a coordinate near 1.0, i.e. visible smearing on the largest tiles.
 
 diff --git a/port/fast3d/gfx_opengl.cpp b/port/fast3d/gfx_opengl.cpp
-index 79030bbbc..a7e503dc9 100644
+index ccc08fa02..7ca66e188 100644
 --- a/port/fast3d/gfx_opengl.cpp
 +++ b/port/fast3d/gfx_opengl.cpp
-@@ -257,7 +257,10 @@ static struct ShaderProgram* gfx_opengl_create_and_load_new_shader(uint64_t shad
+@@ -285,7 +285,10 @@ static struct ShaderProgram* gfx_opengl_create_and_load_new_shader(uint64_t shad
      vs_len += sprintf(vs_buf + vs_len, "#version %s\n", gl_glsl_version_str);
  
      if (gl_es) {
@@ -28,7 +28,7 @@ index 79030bbbc..a7e503dc9 100644
      }
  
      if (gl_glsl_version >= 130) {
-@@ -359,7 +362,11 @@ static struct ShaderProgram* gfx_opengl_create_and_load_new_shader(uint64_t shad
+@@ -388,7 +391,11 @@ static struct ShaderProgram* gfx_opengl_create_and_load_new_shader(uint64_t shad
      fs_len += sprintf(fs_buf + fs_len, "#version %s\n", gl_glsl_version_str);
  
      if (gl_es) {

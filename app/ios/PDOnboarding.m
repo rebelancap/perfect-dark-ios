@@ -119,6 +119,14 @@ static NSString *const kRomFileName = @"pd.ntsc-final.z64";
 		                 "ROM is needed first.";
 		return c;
 	}
+	// And the GoldenEye ROM hack the converter knows (Goldfinger 64, 24 MB).
+	if (head.length >= 0x40 && geconvertHeaderVariantName(h, 0x40)) {
+		c.verdict = PDRomNotARom;
+		c.explanation = [NSString stringWithFormat:@"That is %s, a GoldenEye ROM hack, not Perfect Dark. "
+		                 "It is an optional extra beside GE Plus and goes in the added-content folder — "
+		                 "but Perfect Dark's own ROM is needed first.", geconvertHeaderVariantName(h, 0x40)];
+		return c;
+	}
 
 	if (size != kRomSize) {
 		c.verdict = PDRomWrongSize;
@@ -369,7 +377,8 @@ static NSString *const kRomFileName = @"pd.ntsc-final.z64";
 	ge.text = @"Also optional: your own GoldenEye 007 (US) N64 ROM, and the GoldenEye XBLA "
 	           "release (its .7z or .zip, or its Xbox 360 package), in the same added-content "
 	           "folder under any name. With them, "
-	           "GoldenEye's missions and arenas are playable as GE Plus in the Perfect Menu. "
+	           "GoldenEye's missions and arenas are playable as GE Plus in the Perfect Menu, "
+	           "and the Goldfinger 64 ROM hack (its zip, patch or ROM) beside them. "
 	           "They can be added later from Settings too.";
 
 	UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:

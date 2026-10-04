@@ -2234,3 +2234,37 @@ pass and none needed its intent changed.
   level instead (chicago 0x1d, frame 1500: the "BEAN" graffiti is the readable feature).
 - **A chip's centre may be off the view (D-089)**: saved units are no longer in [0, 1]. A
   bridge `hit` exactly AT x = width answers `MISS outside-overlay`; probe a point inside.
+
+## Traps earned (the upstream pin bump, c18645860 -> 90c8622e7, 1.0.2.1)
+
+218 upstream commits (release v3.14.0, not the branch head). 11 patches failed `patch`;
+the git 3-way rebase (§Traps c18645860) merged 7 of them and four needed hands (D-091).
+
+- **The oracle's GPU vertex path changes the gfx stream wholesale.** Upstream v3.13.0
+  draws meshes, rooms and models from GPU copies when `gfx_opengl_mesh_supported()` says
+  yes - desktop GL 4.1 does, ES never does. A default oracle run differs from the sim on
+  7,998 of 8,009 lines. Every oracle reference and A/B against the sim needs
+  `GpuVertices=0` under `[Video]` in the seed ini (or `--cpu-vertices`).
+- **zsh does not word-split `set -- $r`.** A seed-ini loop over `"844 390" "1280 720"`
+  wrote `DefaultWidth=844 390` and an empty height: the window came up 844x0, the
+  screenshot was 844x1 and gcc/clang still agreed (both drew the same nothing). Check the
+  PNG's size, not just "IDENTICAL".
+- **upstream's xblaimport.c now skips an archive holding a ROM patch** (goldfinger64.zip
+  was being unpacked as Perfect Dark's release). 0047's merge keeps both skips; `PDXbla
+  isOtherRelease` mirrors it (`pdArchiveHoldsRomPatch`). Keep the three in step.
+- **The hack's conversion is "done once per source" by realpath, and an iOS container
+  moves on every install.** Without 0053's `$E` naming, every update re-converts (~4 s,
+  ~0.5-1 GB). The shell's `pdHackConverted()` builds the same `$E/added-content/<name>`.
+- **Goldfinger 64 never draws XBLA art** (upstream: `xblaSwitchStageHeld()`); a hack
+  stage with the GoldenEye release present still differs in pixels from one without (the
+  PD-side Xbla rows affect lighting), not a bug of ours.
+- **Bridge recipe for the hack**: `settings GoldenEye` (twice) -> `settings row GoldenEye 6`
+  presents the real picker -> `picker pick <container tmp path>`; `geplus pick hack <path>`
+  runs the completion alone. Rows are 0-based: 5 = Goldfinger 64 status, 6 = its button.
+  Headless boots: `--boot-ge-variant "Goldfinger 64" --boot-ge-mission 0` (mission),
+  `--boot-map Junkyard` (arena; an unknown name prints the list).
+- **The touch layer starts hidden on a fresh container** (`hit=MISS overlay=hidden`): send
+  `touch on` before menu taps. Menu taps moved since phase 2: the name keyboard's OK is at
+  505,243, the Game Pak row at 420,194, the first agent file at 345,225.
+- **`pgrep -f perfectdark.app/perfectdark` can match the wrong process** for footprint
+  polling; match `Containers/Bundle/Application/.*/perfectdark.app/perfectdark`.

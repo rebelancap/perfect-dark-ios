@@ -859,6 +859,15 @@ static CFTimeInterval sPresentStarted;
 			pdButtonRow(@"Add or replace GoldenEye XBLA…", ^{
 				[weakSelf importGoldenEye:PDGoldenEyeXbla];
 			}),
+			// A GoldenEye ROM hack the converter knows (upstream v3.14.0):
+			// converted beside GE Plus into its own Perfect Menu row.
+			pdInfoRow(@"Goldfinger 64", ^NSString *{
+				PDGoldenEyeFind *f = [PDXbla cachedGoldenEye:PDGoldenEyeHack];
+				return f ? f.rowText : @"checking…";
+			}),
+			pdButtonRow(@"Add or replace Goldfinger 64…", ^{
+				[weakSelf importGoldenEye:PDGoldenEyeHack];
+			}),
 		],
 		@[
 			pdSwitchRow(@"Texture packs", PDDefTexturePacks),
@@ -1151,6 +1160,8 @@ static CFTimeInterval sPresentStarted;
 		        "added-content folder under any name — with these rows, or with the Files app. "
 		        "Turn GoldenEye XBLA off to play GE Plus in GoldenEye's original N64 look; the "
 		        "file stays where it is. Perfect Dark's own Xbox 360 switch is not affected. "
+		        "Goldfinger 64, the GoldenEye ROM hack, gets a Perfect Menu row of its own: add "
+		        "goldfinger64.zip, its patch, or the patched ROM (the patch needs the GoldenEye ROM). "
 		        "Changes here take effect the next time you open the app.";
 	}
 	return nil;

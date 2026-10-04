@@ -36,7 +36,7 @@ NOT YET APPLIED TO A BUILD - scripts/apply-overlay.sh does not exist yet
 was done by flattening cache/xbla/ by hand.
 
 diff --git a/port/src/xblaimport.c b/port/src/xblaimport.c
-index d523f1e61..8d1538b76 100644
+index f999704d9..15902a1ca 100644
 --- a/port/src/xblaimport.c
 +++ b/port/src/xblaimport.c
 @@ -53,7 +53,13 @@

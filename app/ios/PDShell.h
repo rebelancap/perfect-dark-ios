@@ -193,6 +193,12 @@ int archiveFindEntry(const char *path, const char *needle);
 // NGEE and both header CRCs of GoldenEye 007 (US), in any of the three dump
 // byte orders, from the first 0x40 bytes. Pure function, no engine needed.
 int geconvertHeaderIsGoldenEyeUs(const unsigned char *head, size_t len);
+// Same file: the GoldenEye ROM hack a 0x40-byte header is (Goldfinger 64), in
+// any byte order, or NULL; and the hacks the converter knows, by index.
+const char *geconvertHeaderVariantName(const unsigned char *head, size_t len);
+const char *geconvertVariantNameAt(int i);
+// port/src/rompatch.c: a ROM patch by its name (.xdelta .vcdiff .bps .ips).
+int rompatchIsPatchName(const char *name);
 // port/src/gebean.c (overlay 0050, D-081): Mod.XblaGoldenEye as THIS run took
 // it - read once, at the first ask after the config is loaded. Game thread.
 int gebeanSwitchIsOn(void);

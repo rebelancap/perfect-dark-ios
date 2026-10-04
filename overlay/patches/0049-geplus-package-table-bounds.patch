@@ -25,9 +25,11 @@ look, and the cache stays empty.
 The bare package read in place (gebeanPkgExtractFile) goes through x360.c's
 own reader, which bounds every block it reads, so it is unchanged.
 
+diff --git a/port/src/gebean.c b/port/src/gebean.c
+index 722121d90..e93f9d462 100644
 --- a/port/src/gebean.c
 +++ b/port/src/gebean.c
-@@ -3040,7 +3040,7 @@
+@@ -3086,7 +3086,7 @@ static s32 gebeanPkgPlan(struct gebeanpkgsink *s)
  	struct x360stfs stfs;
  	char name[512];
  	unsigned long long bytes = 0;
@@ -36,7 +38,7 @@ own reader, which bounds every block it reads, so it is unchanged.
  	s32 consecutive = 1;
  	u8 *buf;
  
-@@ -3062,6 +3062,8 @@
+@@ -3108,6 +3108,8 @@ static s32 gebeanPkgPlan(struct gebeanpkgsink *s)
  
  	for (u32 i = 0; i < stfs.numFiles; i++) {
  		const struct x360stfsfile *f = &stfs.files[i];
@@ -45,12 +47,10 @@ own reader, which bounds every block it reads, so it is unchanged.
  
  		if (f->isDir || !gebeanWantEntry(x360StfsPath(&stfs, i, name, sizeof(name)), NULL)) {
  			continue;
-@@ -3070,8 +3071,30 @@
- 		if (!gebeanPkgPathIsSafe(name)) {
- 			sysLogPrintf(LOG_WARNING, "gebean: skipping %s in the package", name);
+@@ -3118,6 +3120,28 @@ static s32 gebeanPkgPlan(struct gebeanpkgsink *s)
  			continue;
-+		}
-+
+ 		}
+ 
 +		// The table is read from the file, so nothing in it is taken on trust
 +		// (iOS port overlay 0049): a file's blocks must lie inside the package
 +		// it is in, be as many as its size needs, and name a path no earlier
@@ -62,8 +62,8 @@ own reader, which bounds every block it reads, so it is unchanged.
 +			x360StfsClose(&stfs);
 +			s->failed = 1;
 +			return 0;
- 		}
- 
++		}
++
 +		for (u32 w = 0; w < s->numFiles; w++) {
 +			if (!strcmp(s->files[w].path, name)) {
 +				sysLogPrintf(LOG_ERROR, "gebean: the package's file table names %s twice", name);
@@ -76,26 +76,24 @@ own reader, which bounds every block it reads, so it is unchanged.
  		if (!f->consecutive && f->numBlocks > 1) {
  			consecutive = 0;
  		}
-@@ -3088,9 +3111,17 @@
+@@ -3134,7 +3158,15 @@ static s32 gebeanPkgPlan(struct gebeanpkgsink *s)
  		s->files[s->numFiles].size = f->size;
  		s->numFiles++;
  		bytes += f->size;
 -		numBlocks += (f->size + GEBEAN_STFS_BLOCK - 1) / GEBEAN_STFS_BLOCK;
 +		numBlocks += need;
- 	}
- 
++	}
++
 +	// files that lie inside the package cannot add up to more than it
 +	if (bytes > s->size) {
 +		sysLogPrintf(LOG_ERROR, "gebean: the package's file table holds more than the package");
 +		x360StfsClose(&stfs);
 +		s->failed = 1;
 +		return 0;
-+	}
-+
- 	pkgFilesTotal = (s32)s->numFiles;
+ 	}
  
- 	if (!consecutive) {
-@@ -3114,8 +3145,15 @@
+ 	pkgFilesTotal = (s32)s->numFiles;
+@@ -3160,7 +3192,14 @@ static s32 gebeanPkgPlan(struct gebeanpkgsink *s)
  		return 0;
  	}
  
@@ -106,13 +104,12 @@ own reader, which bounds every block it reads, so it is unchanged.
 +		s->failed = 1;
 +		return 0;
 +	}
- 
-+	s->blocks = malloc((size_t)(numBlocks ? numBlocks : 1) * sizeof(*s->blocks));
 +
++	s->blocks = malloc((size_t)(numBlocks ? numBlocks : 1) * sizeof(*s->blocks));
+ 
  	if (!s->blocks) {
  		x360StfsClose(&stfs);
- 		s->failed = 1;
-@@ -3239,6 +3277,14 @@
+@@ -3285,6 +3324,14 @@ static s32 gebeanPkgSink(const u8 *data, u32 len, void *arg)
  
  			s->tableShift = (((headerSize + 0xfff) & 0xf000) >> 12) == 0xb ? 0 : 1;
  			s->tableEnd = gebeanPkgBlockOffset(s->tableShift, tableBlock + tableBlocks - 1) + GEBEAN_STFS_BLOCK;

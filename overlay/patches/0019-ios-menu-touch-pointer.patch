@@ -191,7 +191,7 @@ index 2255b2149..21dc7d8d9 100644
  	if (y) *y = mouseY * videoGetNativeHeight() / videoGetWindowHeight();
  	return (mouseDX != 0 || mouseDY != 0);
 diff --git a/src/game/menu.c b/src/game/menu.c
-index d363e20e4..14caa7eab 100644
+index 74ae59a46..e71abb17e 100644
 --- a/src/game/menu.c
 +++ b/src/game/menu.c
 @@ -1518,6 +1518,22 @@ bool dialogChangeItemFocusWithMouse(struct menudialog *dialog, s32 mx, s32 my)

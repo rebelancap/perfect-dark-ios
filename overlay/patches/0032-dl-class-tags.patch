@@ -52,10 +52,10 @@ The emission is under #ifndef PLATFORM_N64 so a matching N64 build is
 byte-identical.
 
 diff --git a/src/game/menu.c b/src/game/menu.c
-index 14caa7eab..b70cbac13 100644
+index e71abb17e..604829745 100644
 --- a/src/game/menu.c
 +++ b/src/game/menu.c
-@@ -6069,6 +6069,23 @@ Gfx *menuRender(Gfx *gdl)
+@@ -6083,6 +6083,23 @@ Gfx *menuRender(Gfx *gdl)
  
  	gdl = func0f0d479c(gdl);
  
@@ -79,7 +79,7 @@ index 14caa7eab..b70cbac13 100644
  	gSPDisplayList(gdl++, var800613a0);
  
  	// Render the background
-@@ -6431,6 +6448,9 @@ Gfx *menuRender(Gfx *gdl)
+@@ -6445,6 +6462,9 @@ Gfx *menuRender(Gfx *gdl)
  
  #ifndef PLATFORM_N64
  	gSPClearExtraGeometryModeEXT(gdl++, G_ASPECT_MODE_EXT);
@@ -90,12 +90,12 @@ index 14caa7eab..b70cbac13 100644
  
  	gdl = func0f0d49c8(gdl);
 diff --git a/src/include/gbiex.h b/src/include/gbiex.h
-index d82681671..3e03df788 100644
+index fb7591e30..6eb88ea3d 100644
 --- a/src/include/gbiex.h
 +++ b/src/include/gbiex.h
-@@ -211,6 +211,53 @@
- #define G_OCCLUSIONTEST_EXT          0x4c
+@@ -212,6 +212,53 @@
  #define G_SETTILEOFFSET_EXT          0x4d
+ #define G_MESH_EXT                   0x4e
  
 +/* ------------------------------------------------------------------------ */
 +/* DISPLAY-LIST CLASS TAGS (visionOS 3D stereo mode, D-055).                */

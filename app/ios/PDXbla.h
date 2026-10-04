@@ -178,8 +178,8 @@ typedef NS_ENUM(NSInteger, PDXblaKind) {
 @end
 
 // ---------------------------------------------------------------------------
-// GE Plus's two optional files, which share added-content/ with the release
-// above (D-071, D-072). The engine finds both by their contents, at startup:
+// GE Plus's optional files, which share added-content/ with the release
+// above (D-071, D-072). The engine finds them by their contents, at startup:
 //
 //   * a GoldenEye 007 (US) N64 ROM - port/src/gexplusrom.c, top level of
 //     added-content/ (or the base dir, from which it is moved in), 12 MB,
@@ -189,6 +189,10 @@ typedef NS_ENUM(NSInteger, PDXblaKind) {
 //     (overlay 0046) the same release as the Xbox 360 package (STFS, title
 //     584108A9), bare, in a folder, or in a .7z/.zip - four levels deep in
 //     added-content/ (then the legacy xbla/).
+//   * a GoldenEye ROM hack the converter knows (Goldfinger 64) - gexplusrom.c's
+//     variants: the hack's ROM patched already (either byte order), its patch
+//     (.xdelta/.vcdiff/.bps/.ips) or a .zip/.7z holding one, at the top level
+//     of added-content/. A patch is applied to the GoldenEye ROM above.
 //
 // What changes takes effect at the NEXT launch: the conversion and the unpack
 // run before the menus exist (main.c), and an iOS app cannot restart itself.
@@ -196,6 +200,7 @@ typedef NS_ENUM(NSInteger, PDXblaKind) {
 typedef NS_ENUM(NSInteger, PDGoldenEyeKind) {
 	PDGoldenEyeRom = 0,
 	PDGoldenEyeXbla = 1,
+	PDGoldenEyeHack = 2,
 };
 
 @interface PDGoldenEyeFind : NSObject
@@ -205,6 +210,8 @@ typedef NS_ENUM(NSInteger, PDGoldenEyeKind) {
 @property (nonatomic) unsigned long long bytes;                // 0 for a folder
 @property (nonatomic) BOOL isFolder;                           // an unpacked release
 @property (nonatomic) BOOL isPackage;                          // the Xbox 360 package form (bare, in a folder or archive)
+@property (nonatomic) BOOL isPatch;                            // a ROM hack's patch (or an archive of one), not its ROM
+@property (nonatomic) BOOL needsRom;                           // that patch, with no GoldenEye 007 ROM to apply it to
 /** MB the engine's last unpack needed and did not find, and MB that were free (0 = no refusal). */
 @property (nonatomic) int needMb;
 @property (nonatomic) int freeMb;

@@ -16,7 +16,7 @@ window on its own), the present (eglSwapBuffers), and the swap interval.
 With PD_GL_ANGLE off every line here is preprocessed away.
 
 diff --git a/port/fast3d/gfx_sdl2.cpp b/port/fast3d/gfx_sdl2.cpp
-index e572830d4..6551e9b7b 100644
+index ef19bdac8..4738da8a9 100644
 --- a/port/fast3d/gfx_sdl2.cpp
 +++ b/port/fast3d/gfx_sdl2.cpp
 @@ -11,6 +11,18 @@
@@ -84,7 +84,7 @@ index e572830d4..6551e9b7b 100644
  }
  
  static void gfx_sdl_close(void) {
-@@ -338,7 +374,11 @@ static void gfx_sdl_set_dimensions(uint32_t width, uint32_t height, int32_t posX
+@@ -347,7 +383,11 @@ static void gfx_sdl_set_dimensions(uint32_t width, uint32_t height, int32_t posX
  }
  
  static void gfx_sdl_get_dimensions(uint32_t* width, uint32_t* height, int32_t* posX, int32_t* posY) {
@@ -96,7 +96,7 @@ index e572830d4..6551e9b7b 100644
      SDL_GetWindowPosition(wnd, static_cast<int*>(posX), static_cast<int*>(posY));
  }
  
-@@ -354,7 +394,12 @@ static void gfx_sdl_handle_events(void) {
+@@ -363,7 +403,12 @@ static void gfx_sdl_handle_events(void) {
                  break;
              case SDL_WINDOWEVENT:
                  if (event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
@@ -109,7 +109,7 @@ index e572830d4..6551e9b7b 100644
                      if (!fullscreen_state) {
                          maximized_state = SDL_GetWindowFlags(wnd) & SDL_WINDOW_MAXIMIZED ? true : false;
                      }
-@@ -416,7 +461,11 @@ static void gfx_sdl_swap_buffers_begin(void) {
+@@ -425,7 +470,11 @@ static void gfx_sdl_swap_buffers_begin(void) {
              vk_present_hook();
          }
      } else {
@@ -121,7 +121,7 @@ index e572830d4..6551e9b7b 100644
      }
  }
  
-@@ -452,7 +501,11 @@ static int gfx_sdl_get_swap_interval(void) {
+@@ -461,7 +510,11 @@ static int gfx_sdl_get_swap_interval(void) {
      if (use_vulkan) {
          return vk_get_interval_hook ? vk_get_interval_hook() : 1;
      }
@@ -133,7 +133,7 @@ index e572830d4..6551e9b7b 100644
  }
  
  static bool gfx_sdl_set_swap_interval(int interval) {
-@@ -461,7 +514,11 @@ static bool gfx_sdl_set_swap_interval(int interval) {
+@@ -470,7 +523,11 @@ static bool gfx_sdl_set_swap_interval(int interval) {
          vsync_enabled = ok && (interval != 0);
          return ok;
      }

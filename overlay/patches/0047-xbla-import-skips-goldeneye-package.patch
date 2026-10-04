@@ -11,9 +11,11 @@ were Perfect Dark's. Both are now passed over by the same tests gebean.c uses
 as the package). Perfect Dark's own package (584109C2) and archives are found
 exactly as before.
 
+diff --git a/port/src/xblaimport.c b/port/src/xblaimport.c
+index 15902a1ca..12d713639 100644
 --- a/port/src/xblaimport.c
 +++ b/port/src/xblaimport.c
-@@ -227,7 +227,10 @@
+@@ -227,7 +227,10 @@ static s32 xblaLooksLikePackage(const char *path)
  			 !memcmp(magic, "PIRS", 4));
  	fclose(fp);
  
@@ -25,12 +27,12 @@ exactly as before.
  }
  
  static s32 xblaPathIsDir(const char *path)
-@@ -273,7 +276,8 @@
- 	if (xblaLooksLikePackage(path) ||
- 			(scan->archives && archiveIsSupported(path) && fsFileSize(path) >= 0 &&
+@@ -280,7 +283,8 @@ static void xblaScanForPackage(const char *name, void *arg)
  			 !archiveFindEntry(path, "files/new/char/") &&
--			 !archiveFindEntry(path, GEBEANCE_DIFF_ENTRY))) {
-+			 !archiveFindEntry(path, GEBEANCE_DIFF_ENTRY) &&
+ 			 !archiveFindEntry(path, GEBEANCE_DIFF_ENTRY) &&
+ 			 !archiveFindEntry(path, ".xdelta") && !archiveFindEntry(path, ".vcdiff") &&
+-			 !archiveFindEntry(path, ".bps") && !archiveFindEntry(path, ".ips"))) {
++			 !archiveFindEntry(path, ".bps") && !archiveFindEntry(path, ".ips") &&
 +			 !gebeanArchiveHoldsPackage(path))) {
  		strncpy(scan->found, path, sizeof(scan->found) - 1);
  		return;

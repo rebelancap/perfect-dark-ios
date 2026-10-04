@@ -18,7 +18,7 @@ ANGLE glue, because the committed oracle frame is that size and a pixel diff
 is only a gate at matched resolution.
 
 diff --git a/port/fast3d/gfx_sdl2.cpp b/port/fast3d/gfx_sdl2.cpp
-index 4ab35e44b..74340b4aa 100644
+index 0eb8b0530..56df84d34 100644
 --- a/port/fast3d/gfx_sdl2.cpp
 +++ b/port/fast3d/gfx_sdl2.cpp
 @@ -138,6 +138,13 @@ static void gfx_sdl_init(const struct GfxWindowInitSettings *set) {

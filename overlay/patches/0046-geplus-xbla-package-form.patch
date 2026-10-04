@@ -46,9 +46,11 @@ from (gebeanTreeInfo() names no archive for it).
 Nothing here draws anything differently: with the loose form, or with no
 GoldenEye files, the game reads exactly what it read before.
 
+diff --git a/port/include/archive.h b/port/include/archive.h
+index 4821e683e..57b0a6665 100644
 --- a/port/include/archive.h
 +++ b/port/include/archive.h
-@@ -61,6 +61,26 @@
+@@ -61,6 +61,26 @@ s32 archiveExtractMatching(const char *path, const char *destDir, archivefilter
   */
  void archiveGetProgress(s32 *done, s32 *total);
  
@@ -75,14 +77,34 @@ GoldenEye files, the game reads exactly what it read before.
  #ifdef __cplusplus
  }
  #endif
+diff --git a/port/include/gebean.h b/port/include/gebean.h
+index 28a3bfe96..ce3af719d 100644
+--- a/port/include/gebean.h
++++ b/port/include/gebean.h
+@@ -427,6 +427,15 @@ void gebeanFontClose(struct gebeanfont *font);
+ 
+ s32 gebeanTreeInfo(char *root, u32 rootLen, char *archive, u32 archiveLen, char *cache, u32 cacheLen);
+ 
++/**
++ * The release in its Xbox 360 package form (iOS port overlay 0046): whether a
++ * file is GoldenEye XBLA's STFS package (title 584108A9, read at 0x360), and
++ * whether a .7z or .zip holds it. xblaimport.c asks both to pass the package
++ * over when looking for Perfect Dark's own, which is an STFS package too.
++ */
++s32 gebeanIsPackageFile(const char *path);
++s32 gebeanArchiveHoldsPackage(const char *path);
++
+ /**
+  * The GoldenEye XBLA Community Edition, applied by the game from the player's
+  * own updater zip in added-content/ (gebeance.c). Chosen in the menu, drawn
+diff --git a/port/src/archive.c b/port/src/archive.c
+index 66eeb41bb..aec9352c5 100644
 --- a/port/src/archive.c
 +++ b/port/src/archive.c
-@@ -1039,8 +1039,410 @@
- 	archive7zClose(&a);
- 
+@@ -1041,6 +1041,408 @@ static s32 archiveExtract7zMatching(const char *path, const char *destDir, archi
  	return written;
-+}
-+
+ }
+ 
 +/* -------------------------------------------------------------------------
 + * One large entry, as a stream (iOS port overlay 0046)
 + * ------------------------------------------------------------------------- */
@@ -464,8 +486,8 @@ GoldenEye files, the game reads exactly what it read before.
 +	fclose(f);
 +
 +	return result;
- }
- 
++}
++
 +s32 archiveStreamEntry(const char *path, const char *needle, archivesink sink, void *arg, u64 *size)
 +{
 +	const char *ext = archiveExt(path);
@@ -488,28 +510,12 @@ GoldenEye files, the game reads exactly what it read before.
  s32 archiveExtractMatching(const char *path, const char *destDir, archivefilter filter, void *arg)
  {
  	if (strcasecmp(archiveExt(path), ".zip") == 0) {
---- a/port/include/gebean.h
-+++ b/port/include/gebean.h
-@@ -428,6 +428,15 @@
- s32 gebeanTreeInfo(char *root, u32 rootLen, char *archive, u32 archiveLen, char *cache, u32 cacheLen);
- 
- /**
-+ * The release in its Xbox 360 package form (iOS port overlay 0046): whether a
-+ * file is GoldenEye XBLA's STFS package (title 584108A9, read at 0x360), and
-+ * whether a .7z or .zip holds it. xblaimport.c asks both to pass the package
-+ * over when looking for Perfect Dark's own, which is an STFS package too.
-+ */
-+s32 gebeanIsPackageFile(const char *path);
-+s32 gebeanArchiveHoldsPackage(const char *path);
-+
-+/**
-  * The GoldenEye XBLA Community Edition, applied by the game from the player's
-  * own updater zip in added-content/ (gebeance.c). Chosen in the menu, drawn
-  * from the next start: gebeanCeRestartNeeded() says a change is waiting.
+diff --git a/port/src/gebean.c b/port/src/gebean.c
+index 28b93c88f..722121d90 100644
 --- a/port/src/gebean.c
 +++ b/port/src/gebean.c
-@@ -22,6 +22,11 @@
- #include <string.h>
+@@ -23,6 +23,11 @@
+ #include <strings.h>
  #include <math.h>
  #include <sys/stat.h>
 +#if !defined(PLATFORM_IOS) && !defined(PLATFORM_WIN32)
@@ -520,10 +526,10 @@ GoldenEye files, the game reads exactly what it read before.
  #include <ultra64.h>
  #include <PR/ultratypes.h>
  #include "constants.h"
-@@ -71,7 +76,16 @@
- // skydomes, the twelfth the HUD's crosshair, the thirteenth the HUD's
- // ammunition pictures.
- #define GEBEAN_DONE_FILE ".extracted13"
+@@ -73,7 +78,16 @@
+ // ammunition pictures, the fourteenth the monitors' pictures, the bullet holes
+ // and the hit puffs.
+ #define GEBEAN_DONE_FILE ".extracted14"
 -#define GEBEAN_SCAN_DEPTH 2
 +// Four, not two (iOS port overlay 0046): the release in its Xbox 360 package
 +// form keeps the console's own folders, and a folder of it as it comes out of
@@ -538,28 +544,25 @@ GoldenEye files, the game reads exactly what it read before.
  
  // What says a folder is Bean's, and which of an archive's entries are wanted:
  // the characters and heads, where Rare put them - the HD ones in new/, and in
-@@ -2502,7 +2516,15 @@
+@@ -2546,6 +2560,14 @@ static void gebeanScanEntry(const char *name, void *arg)
  	// release sits in the same folder, as an archive of its own.
  	if (scan->archives && archiveIsSupported(path) && archiveFindEntry(path, GEBEAN_WANT_CHARS)) {
  		snprintf(scan->found, sizeof(scan->found), "%s", path);
 +		return;
- 	}
++	}
 +
 +	// Or the release in its Xbox 360 package form: the package, known by its
 +	// title id and never by its name (Perfect Dark's is a package too), or an
 +	// archive holding it.
 +	if (scan->archives && (archiveIsSupported(path) ? gebeanArchiveHoldsPackage(path) : gebeanIsPackageFile(path))) {
 +		snprintf(scan->found, sizeof(scan->found), "%s", path);
-+	}
+ 	}
  }
  
- /**
-@@ -2597,8 +2619,830 @@
- 		|| strstr(lower, GEBEAN_WANT_MENU_SIGHT) != NULL || strstr(lower, GEBEAN_WANT_MENU_ATTRACT) != NULL
- 		|| strstr(lower, GEBEAN_WANT_MENU_FONTS) != NULL || strstr(lower, GEBEAN_WANT_HUD_SIGHT) != NULL
- 		|| strstr(lower, GEBEAN_WANT_HUD_AMMO) != NULL;
-+}
-+
+@@ -2645,6 +2667,828 @@ static s32 gebeanWantEntry(const char *name, void *arg)
+ 		|| strstr(lower, GEBEAN_WANT_HITPUFFS) != NULL;
+ }
+ 
 +/* -------------------------------------------------------------------------
 + * The release in its Xbox 360 package form (iOS port overlay 0046)
 + *
@@ -834,8 +837,8 @@ GoldenEye files, the game reads exactly what it read before.
 +	x360StfsClose(&stfs);
 +
 +	return written;
- }
- 
++}
++
 +// One 4KB block of a wanted file: where it is in the package, and where in its file.
 +struct gebeanpkgblock {
 +	unsigned long long ofs;
@@ -1385,7 +1388,7 @@ GoldenEye files, the game reads exactly what it read before.
  static void gebeanSetRoot(const char *tree)
  {
  	snprintf(rootPath, sizeof(rootPath), "%s/files", tree);
-@@ -2655,7 +3499,10 @@
+@@ -2701,7 +3545,10 @@ static s32 gebeanLocate(s32 mayUnpack)
  		}
  
  		if (archivePath[0]) {
@@ -1397,7 +1400,7 @@ GoldenEye files, the game reads exactly what it read before.
  		}
  	}
  
-@@ -2665,7 +3512,10 @@
+@@ -2711,7 +3558,10 @@ static s32 gebeanLocate(s32 mayUnpack)
  
  	snprintf(marker, sizeof(marker), "%s/" GEBEAN_DONE_FILE, cache);
  
@@ -1409,7 +1412,7 @@ GoldenEye files, the game reads exactly what it read before.
  		gebeanSetRoot(found);
  		return 1;
  	}
-@@ -2674,20 +3524,47 @@
+@@ -2720,20 +3570,47 @@ static s32 gebeanLocate(s32 mayUnpack)
  		return 0;
  	}
  
@@ -1458,7 +1461,7 @@ GoldenEye files, the game reads exactly what it read before.
  		fclose(fp);
  	}
  
-@@ -2719,7 +3596,8 @@
+@@ -2765,7 +3642,8 @@ s32 gebeanTreeInfo(char *root, u32 rootLen, char *archive, u32 archiveLen, char
  	}
  
  	snprintf(root, rootLen, "%s", rootPath);
@@ -1468,7 +1471,7 @@ GoldenEye files, the game reads exactly what it read before.
  
  	return 1;
  }
-@@ -2771,7 +3649,20 @@
+@@ -2817,7 +3695,20 @@ void gebeanUnpackAtStartup(void)
  
  		archiveGetProgress(&done, &total);
  
@@ -1490,7 +1493,7 @@ GoldenEye files, the game reads exactly what it read before.
  			snprintf(line, sizeof(line), "ONCE ONLY - %d/%d FILES", done, total);
  		} else {
  			snprintf(line, sizeof(line), "ONCE ONLY - READING THE ARCHIVE");
-@@ -2782,6 +3673,20 @@
+@@ -2828,6 +3719,20 @@ void gebeanUnpackAtStartup(void)
  	}
  
  	SDL_WaitThread(thread, NULL);

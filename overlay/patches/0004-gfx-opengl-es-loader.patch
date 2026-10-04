@@ -21,10 +21,10 @@ The proc loader also has to come from `eglGetProcAddress`: SDL_GL_GetProcAddress
 has no context to answer for.
 
 diff --git a/port/fast3d/gfx_opengl.cpp b/port/fast3d/gfx_opengl.cpp
-index dae319a47..79030bbbc 100644
+index 943741620..ccc08fa02 100644
 --- a/port/fast3d/gfx_opengl.cpp
 +++ b/port/fast3d/gfx_opengl.cpp
-@@ -1120,8 +1120,15 @@ static void gfx_opengl_log_info(void) {
+@@ -1731,8 +1731,15 @@ static void gfx_opengl_log_info(void) {
      sysLogPrintf(LOG_NOTE, "GL: ARB_texture_mirror_clamp_to_edge: %s", GLAD_GL_ARB_texture_mirror_clamp_to_edge ? "yes" : "no");
  }
  
@@ -41,7 +41,7 @@ index dae319a47..79030bbbc 100644
      if (ret) {
          return ret;
      }
-@@ -1131,7 +1138,7 @@ static void *gl_load_proc(const char *name) {
+@@ -1742,7 +1749,7 @@ static void *gl_load_proc(const char *name) {
      char tmp[256] = { 0 };
      for (size_t i = 0; i < sizeof(post) / sizeof(*post); ++i) {
          snprintf(tmp, sizeof(tmp), "%s%s", name, post[i]);
@@ -50,7 +50,7 @@ index dae319a47..79030bbbc 100644
          if (ret) {
              return ret;
          }
-@@ -1176,6 +1183,19 @@ static void gfx_opengl_init_extensions(void) {
+@@ -1787,6 +1794,19 @@ static void gfx_opengl_init_extensions(void) {
  }
  
  static void gfx_opengl_init(void) {
@@ -70,7 +70,7 @@ index dae319a47..79030bbbc 100644
      if (!gladLoadGLLoader(gl_load_proc) || glGetString == NULL || glEnable == NULL) {
          sysFatalSetupError("Could not load OpenGL.\nReported SDL error: %s", SDL_GetError());
      }
-@@ -1185,6 +1205,7 @@ static void gfx_opengl_init(void) {
+@@ -1796,6 +1816,7 @@ static void gfx_opengl_init(void) {
      SDL_GL_GetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, &val);
      gl_core_profile = (val == SDL_GL_CONTEXT_PROFILE_CORE);
      gl_es = (val == SDL_GL_CONTEXT_PROFILE_ES);

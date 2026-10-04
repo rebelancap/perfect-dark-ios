@@ -13,13 +13,14 @@ returning. Nothing else moves: in 2D (and on every other platform) the block
 is the same runtime-gated / compiled-out no-op it was, so the M-001 display
 list is unchanged.
 
+diff --git a/src/game/sight.c b/src/game/sight.c
+index 8fc733a07..e10ee72a4 100644
 --- a/src/game/sight.c
 +++ b/src/game/sight.c
-@@ -1847,7 +1847,23 @@
- #endif
+@@ -1848,6 +1848,22 @@ Gfx *sightDraw(Gfx *gdl, bool sighton, s32 sight)
  
  	sightTick(sighton);
-+
+ 
 +#if defined(TARGET_OS_VISION) && TARGET_OS_VISION
 +	// D-064: one trace, one tag, and every rectangle of the reticle inside the
 +	// span gets it. The tag is a G_NOOP, so on every other platform this is a
@@ -29,7 +30,7 @@ list is unchanged.
 +	// own crosshair below, which returns early: it had no depth in 3D (it sat
 +	// on the panel in both eyes, in front of whatever it pointed at).
 +	const bool stereo3d = pdVisionStereoIsActive() != 0;
- 
++
 +	if (stereo3d) {
 +		gDPPdDlTag(gdl++, PD_DLTAG_DEPTH((s32)sightReticleDepth(crossx, crossy)));
 +		gDPPdDlTag(gdl++, PD_DLSPAN_DEPTH_BEGIN);
@@ -39,22 +40,18 @@ list is unchanged.
  #ifndef PLATFORM_N64
  	// GoldenEye's own crosshair for anything of GoldenEye's in the hand on GE
  	// Plus's levels (gehud.c). The watch's SIGHT ON-SCREEN is Sight on Screen,
-@@ -1860,7 +1876,13 @@
- 		if (optionsGetSightOnScreen(g_Vars.currentplayerstats->mpindex)
- 				&& (sighton || optionsGetAlwaysShowTarget(g_Vars.currentplayerstats->mpindex))) {
+@@ -1862,23 +1878,15 @@ Gfx *sightDraw(Gfx *gdl, bool sighton, s32 sight)
  			gdl = geHudRenderSight(gdl, crossx, crossy);
-+		}
-+
+ 		}
+ 
+-		g_ScaleX = 1;
+-
+-		return gdl;
+-	}
 +#if defined(TARGET_OS_VISION) && TARGET_OS_VISION
 +		if (stereo3d) {
 +			gDPPdDlTag(gdl++, PD_DLSPAN_DEPTH_END);
- 		}
-+#endif
- 
- 		g_ScaleX = 1;
- 
-@@ -1868,20 +1890,6 @@
- 	}
++		}
  #endif
  
 -#if defined(TARGET_OS_VISION) && TARGET_OS_VISION
@@ -64,13 +61,12 @@ list is unchanged.
 -	// runtime gate makes the display list byte-identical to the one the oracle
 -	// walks, which is what the M-001 replay compares.
 -	const bool stereo3d = pdVisionStereoIsActive() != 0;
--
++		g_ScaleX = 1;
+ 
 -	if (stereo3d) {
 -		gDPPdDlTag(gdl++, PD_DLTAG_DEPTH((s32)sightReticleDepth(crossx, crossy)));
 -		gDPPdDlTag(gdl++, PD_DLSPAN_DEPTH_BEGIN);
--	}
--#endif
--
- 	switch (sight) {
- 	case SIGHT_DEFAULT:
- 		gdl = sightDrawDefault(gdl, sighton && optionsGetSightOnScreen(g_Vars.currentplayerstats->mpindex), crossx, crossy);
++		return gdl;
+ 	}
+ #endif
+ 

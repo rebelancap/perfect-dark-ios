@@ -27,7 +27,7 @@ BELOW consumption, so the queue cannot run away with the governor raised, and
 `queueLimit` (16384 on iOS) is still the hard ceiling.
 
 diff --git a/port/src/audio.c b/port/src/audio.c
-index 63ed859..0b456cf 100644
+index 63ed859b0..0b456cf27 100644
 --- a/port/src/audio.c
 +++ b/port/src/audio.c
 @@ -6,6 +6,7 @@
@@ -49,7 +49,7 @@ index 63ed859..0b456cf 100644
  #endif
  }
 diff --git a/src/include/lib/audiomgr.h b/src/include/lib/audiomgr.h
-index ec1d6ba..2b99dac 100644
+index ec1d6ba0a..2b99dacc8 100644
 --- a/src/include/lib/audiomgr.h
 +++ b/src/include/lib/audiomgr.h
 @@ -18,6 +18,11 @@ void amgrStopThread(void);
@@ -65,7 +65,7 @@ index ec1d6ba..2b99dac 100644
  
  #endif
 diff --git a/src/lib/audiomgr.c b/src/lib/audiomgr.c
-index 7791798..b381599 100644
+index 7791798de..b381599fd 100644
 --- a/src/lib/audiomgr.c
 +++ b/src/lib/audiomgr.c
 @@ -321,6 +321,24 @@ void amgrHandleDoneMsg(AudioInfo *info)

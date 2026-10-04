@@ -131,12 +131,20 @@ replace them from **Settings → GoldenEye 007 (GE Plus)**, which says plainly i
 a file is not the right one; changes there take effect the next time you open
 the app.
 
+**Goldfinger 64**, the GoldenEye ROM hack, is converted the same way beside GE
+Plus and gets its own row in the Perfect Menu — its missions, arenas, guns and
+music, with its own folder screens. Put `goldfinger64.zip` (or the `.xdelta`
+patch inside it) in `added-content` beside the GoldenEye 007 (US) ROM, which
+the patch is applied to; a Goldfinger 64 ROM you have already patched works
+too, in any byte order. The next launch converts it once (a few seconds). It
+always draws in the N64 look. Settings has an add/replace row for it.
+
 ### Everything else, in the same folder
 
 | Path | What it is |
 | --- | --- |
 | `pd.ntsc-final.z64` | the ROM (or `data/pd.ntsc-final.z64`) |
-| `added-content/` | your XBLA archive or package, and optionally a GoldenEye 007 (US) ROM and the GoldenEye XBLA release (archive or package) |
+| `added-content/` | your XBLA archive or package, and optionally a GoldenEye 007 (US) ROM, the GoldenEye XBLA release (archive or package) and Goldfinger 64 |
 | `texture-packs/` | texture packs — a folder, or the `.zip`/`.7z` it came in |
 | `model-packs/` | model packs, one folder per pack |
 | `mods/` | mods and console-mod patches, exactly as downloaded |

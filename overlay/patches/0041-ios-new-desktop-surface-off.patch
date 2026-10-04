@@ -30,9 +30,11 @@ row and its automatic path go through:
 
 Every hunk is PLATFORM_IOS-gated; no other platform changes by a byte.
 
+diff --git a/port/src/optionsmenu.c b/port/src/optionsmenu.c
+index 08bc1678e..af4b39916 100644
 --- a/port/src/optionsmenu.c
 +++ b/port/src/optionsmenu.c
-@@ -870,6 +870,14 @@
+@@ -892,6 +892,14 @@ static MenuItemHandlerResult menuhandlerGpuVertices(s32 operation, struct menuit
  static MenuItemHandlerResult menuhandlerSmaa(s32 operation, struct menuitem *item, union handlerdata *data)
  {
  	switch (operation) {
@@ -47,7 +49,7 @@ Every hunk is PLATFORM_IOS-gated; no other platform changes by a byte.
  	case MENUOP_GET:
  		return videoGetSmaa();
  	case MENUOP_SET:
-@@ -895,6 +903,14 @@
+@@ -917,6 +925,14 @@ static MenuItemHandlerResult menuhandlerUpscaling(s32 operation, struct menuitem
  	};
  
  	switch (operation) {
@@ -62,7 +64,7 @@ Every hunk is PLATFORM_IOS-gated; no other platform changes by a byte.
  	case MENUOP_GETOPTIONCOUNT:
  		data->dropdown.value = VIDEO_UPSCALING_COUNT;
  		break;
-@@ -926,6 +942,14 @@
+@@ -948,6 +964,14 @@ static MenuItemHandlerResult menuhandlerSupersampling(s32 operation, struct menu
  	};
  
  	switch (operation) {
@@ -77,7 +79,7 @@ Every hunk is PLATFORM_IOS-gated; no other platform changes by a byte.
  	case MENUOP_GETOPTIONCOUNT:
  		data->dropdown.value = VIDEO_SUPERSAMPLING_COUNT;
  		break;
-@@ -947,6 +971,14 @@
+@@ -969,6 +993,14 @@ static MenuItemHandlerResult menuhandlerSupersampling(s32 operation, struct menu
  static MenuItemHandlerResult menuhandlerFsrSharpness(s32 operation, struct menuitem *item, union handlerdata *data)
  {
  	switch (operation) {
@@ -92,7 +94,7 @@ Every hunk is PLATFORM_IOS-gated; no other platform changes by a byte.
  	case MENUOP_GETSLIDER:
  		data->slider.value = (2.f - videoGetFsrSharpness()) * 10.f + 0.5f;
  		break;
-@@ -988,7 +1020,14 @@
+@@ -1010,7 +1042,14 @@ static MenuItemHandlerResult menuhandlerMSAA(s32 operation, struct menuitem *ite
  
  	switch (operation) {
  	case MENUOP_GETOPTIONCOUNT:
@@ -107,7 +109,7 @@ Every hunk is PLATFORM_IOS-gated; no other platform changes by a byte.
  		break;
  	case MENUOP_GETOPTIONTEXT:
  		if (data->dropdown.value >= menuMsaaCount()) {
-@@ -1005,9 +1044,12 @@
+@@ -1027,9 +1066,12 @@ static MenuItemHandlerResult menuhandlerMSAA(s32 operation, struct menuitem *ite
  		break;
  	case MENUOP_GETSELECTEDINDEX:
  		msaa = videoGetMSAA();
@@ -121,7 +123,7 @@ Every hunk is PLATFORM_IOS-gated; no other platform changes by a byte.
  			data->dropdown.value = 0;
  		} else if (msaa < 4) {
  			data->dropdown.value = 1;
-@@ -1032,6 +1074,12 @@
+@@ -1054,6 +1096,12 @@ static MenuItemHandlerResult menuhandlerRenderer(s32 operation, struct menuitem
  	s32 count;
  
  	switch (operation) {
@@ -134,7 +136,7 @@ Every hunk is PLATFORM_IOS-gated; no other platform changes by a byte.
  	case MENUOP_GETOPTIONCOUNT:
  		count = 1;
  		while (count < ARRAYCOUNT(names) && videoRendererAvailable(count)) {
-@@ -7507,6 +7555,10 @@
+@@ -7537,6 +7585,10 @@ static const struct {
  };
  
  #define ADVANCED_ROW_RAWINPUT 3
@@ -145,30 +147,30 @@ Every hunk is PLATFORM_IOS-gated; no other platform changes by a byte.
  
  static const char *menutextAdvancedRestart(struct menuitem *item)
  {
-@@ -7531,8 +7583,15 @@
+@@ -7561,7 +7613,14 @@ static MenuItemHandlerResult menuhandlerAdvancedRestart(s32 operation, struct me
  	case MENUOP_SET:
  		advancedRestartRows[idx].set(data->checkbox.value);
  		break;
 -#ifndef _WIN32
 +#ifdef PLATFORM_IOS
- 	case MENUOP_CHECKHIDDEN:
++	case MENUOP_CHECKHIDDEN:
 +		// HiDPI: a phone has one panel and one right answer - patch 0017 forces
 +		// the native drawable whatever Video.AllowHiDpi says. HIDAPI: the shell
 +		// forces SDL's HIDAPI off at OVERRIDE priority (D-030; on iOS it means
 +		// CoreBluetooth, and a TCC abort). Neither row could change anything.
 +		return idx == ADVANCED_ROW_HIDPI || idx == ADVANCED_ROW_HIDAPI || idx == ADVANCED_ROW_RAWINPUT;
 +#elif !defined(_WIN32)
-+	case MENUOP_CHECKHIDDEN:
+ 	case MENUOP_CHECKHIDDEN:
  		// SDL's raw input back-end is Windows only
  		return idx == ADVANCED_ROW_RAWINPUT;
- #endif
+diff --git a/port/src/patchnotes.c b/port/src/patchnotes.c
+index 7b468a467..da9ff6cd6 100644
 --- a/port/src/patchnotes.c
 +++ b/port/src/patchnotes.c
-@@ -493,6 +493,18 @@
- void patchnotesInit(void)
+@@ -494,6 +494,18 @@ void patchnotesInit(void)
  {
  	s32 mine = patchnotesBuildNumber();
-+
+ 
 +#ifdef PLATFORM_IOS
 +	// The popup is Dab's Mod's desktop changelog, shown once after an UPDATE
 +	// of the desktop build (and, to an install whose pd.ini predates the
@@ -180,12 +182,15 @@ Every hunk is PLATFORM_IOS-gated; no other platform changes by a byte.
 +	g_PopupDone = true;
 +	return;
 +#endif
- 
++
  	if (g_Seen < 0 && fsFileSize(CONFIG_PATH) <= 0) {
  		g_Seen = mine;
+ 		g_PopupDone = true;
+diff --git a/port/src/update.c b/port/src/update.c
+index b32b6b917..540dcdb20 100644
 --- a/port/src/update.c
 +++ b/port/src/update.c
-@@ -1203,7 +1203,13 @@
+@@ -1203,7 +1203,13 @@ void updateInstall(void)
  
  bool updateIsAvailable(void)
  {

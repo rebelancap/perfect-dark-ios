@@ -241,7 +241,7 @@ static NSString *pdErr(NSString *fmt, ...)
 		        " audio [volume 0-100|mute on|off|mode 0-4|reset] | render <pct> |"
 		        " prof [reset] | gfx |"
 		        " gamefile <defaults|save|load [dev]> |"
-		        " rom | xbla [wait N|release on|off|pick <path>] | geplus [scan|pick rom|xbla <path>|release on|off] | adopt fail copy|swap|off | texpack | quit |"
+		        " rom | xbla [wait N|release on|off|pick <path>] | geplus [scan|pick rom|xbla|hack <path>|release on|off] | adopt fail copy|swap|off | texpack | quit |"
 		        " heartbeat | hang <ms> | dump | graft <on|off> | hide60 <on|off> |"
 		        " stall <ms>|every <s> <ms>|off | geo [repair on|off|now] | presented | picker cancel|dismiss|pick <path> |"
 		        " audio trace on|off|dump [name] | audio interrupt begin|end |"
@@ -286,7 +286,7 @@ static NSString *pdErr(NSString *fmt, ...)
 	// polling a container path from the host is racing the app's own writes.
 	// GE Plus's two files (D-072). `geplus` alone: the cached scan, no I/O on
 	// the main thread. `geplus scan`: rescan in the background and wait for it.
-	// `geplus pick <rom|xbla> <path>`: the settings rows' picker completion with
+	// `geplus pick <rom|xbla|hack> <path>`: the settings rows' picker completion with
 	// a file the simulator can read - the same validation, copy into
 	// added-content/, replace and alert as a real Files pick. The real picker's
 	// UI is the one thing it does not exercise.
@@ -310,7 +310,9 @@ static NSString *pdErr(NSString *fmt, ...)
 				(int)on, ini, run];
 		}
 		if (argv.count >= 4 && [argv[1].lowercaseString isEqualToString:@"pick"]) {
-			NSInteger kind = [argv[2].lowercaseString isEqualToString:@"rom"] ? PDGoldenEyeRom : PDGoldenEyeXbla;
+			NSString *which = argv[2].lowercaseString;
+			NSInteger kind = [which isEqualToString:@"rom"] ? PDGoldenEyeRom
+				: [which isEqualToString:@"hack"] ? PDGoldenEyeHack : PDGoldenEyeXbla;
 			NSString *path = [[argv subarrayWithRange:NSMakeRange(3, argv.count - 3)] componentsJoinedByString:@" "];
 			if (![NSFileManager.defaultManager fileExistsAtPath:path]) {
 				return pdErr(@"no such file: %@", path);

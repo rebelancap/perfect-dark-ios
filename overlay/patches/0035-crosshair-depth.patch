@@ -63,10 +63,10 @@ BUILD, not a MODE: the trace and both tags are behind a runtime
 pdVisionStereoIsActive() as well, so in 2D the display list is byte-identical
 to the one the oracle walks.
 diff --git a/port/fast3d/gfx_pc.cpp b/port/fast3d/gfx_pc.cpp
-index 9257c5f97..1b8f7fff7 100644
+index d7ae451d1..0817237a8 100644
 --- a/port/fast3d/gfx_pc.cpp
 +++ b/port/fast3d/gfx_pc.cpp
-@@ -2274,6 +2274,7 @@ struct PDStereoState {
+@@ -2377,6 +2377,7 @@ struct PDStereoState {
      int flat_span;      // inside menuRender: flatten everything
      float bg_scale;     // bgGetScaleBg2Gfx() for this frame (PD_DLTAG_SCALE)
      float depth_tag;    // the view depth of the next 2D rect, 0 = none
@@ -74,7 +74,7 @@ index 9257c5f97..1b8f7fff7 100644
      float world_a;      // P[0][0] of the last PLAIN perspective load
      // D-061, the per-vertex near clamp. Set when a WORLD-classed projection is
      // folded and zero for every other class, so the test in gfx_sp_load_vertex
-@@ -2284,7 +2285,7 @@ struct PDStereoState {
+@@ -2387,7 +2388,7 @@ struct PDStereoState {
      float near_qm;      // the asymptote: 1/(D_min in view units)
      float near_dq;      // near_qm - near_q0
  };
@@ -83,7 +83,7 @@ index 9257c5f97..1b8f7fff7 100644
                                     0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
  
  /**
-@@ -2333,6 +2334,11 @@ static void gfx_stereo_dl_tag(uint32_t w1) {
+@@ -2436,6 +2437,11 @@ static void gfx_stereo_dl_tag(uint32_t w1) {
      switch (payload) {
          case PD_DLSPAN_FLAT_BEGIN: pd_stereo.flat_span = 1; break;
          case PD_DLSPAN_FLAT_END:   pd_stereo.flat_span = 0; break;
@@ -95,7 +95,7 @@ index 9257c5f97..1b8f7fff7 100644
          case PD_DLCLASS_SKY:       pd_stereo.pending_class = PD_DLCLASS_SKY; break;
          case PD_DLCLASS_GUN:       pd_stereo.pending_class = PD_DLCLASS_GUN; break;
          default:                   pd_stereo.pending_class = PD_DLCLASS_WORLD; break;
-@@ -2346,6 +2352,7 @@ static void gfx_stereo_reset_classes(void) {
+@@ -2449,6 +2455,7 @@ static void gfx_stereo_reset_classes(void) {
      pd_stereo.flat_span = 0;
      pd_stereo.bg_scale = 1.0f;
      pd_stereo.depth_tag = 0.0f;
@@ -103,7 +103,7 @@ index 9257c5f97..1b8f7fff7 100644
      pd_stereo.world_a = 0.0f;
      pd_stereo.near_k = 0.0f;
      pd_stereo_mul_p = 0;
-@@ -4771,7 +4778,9 @@ static void gfx_draw_rectangle(int32_t ulx, int32_t uly, int32_t lrx, int32_t lr
+@@ -7892,7 +7899,9 @@ static void gfx_draw_rectangle(int32_t ulx, int32_t uly, int32_t lrx, int32_t lr
      // glare lands on its fixture in both eyes.
      if (pd_stereo.depth_tag > 0.0f) {
          const float d = pd_stereo.depth_tag;
@@ -115,7 +115,7 @@ index 9257c5f97..1b8f7fff7 100644
          if (pdVisionStereoFold(&eSigned, &conv, &gunConv) && eSigned != 0.0f &&
              conv > 0.0f && pd_stereo.world_a != 0.0f) {
 diff --git a/src/game/sight.c b/src/game/sight.c
-index 6bccbf6e2..84a43dbe7 100644
+index 6bccbf6e2..8fc733a07 100644
 --- a/src/game/sight.c
 +++ b/src/game/sight.c
 @@ -24,6 +24,153 @@
@@ -307,10 +307,10 @@ index 6bccbf6e2..84a43dbe7 100644
  
  	return gdl;
 diff --git a/src/include/gbiex.h b/src/include/gbiex.h
-index dafe7b2b7..f4abd2d81 100644
+index e39bc4d38..961951e3d 100644
 --- a/src/include/gbiex.h
 +++ b/src/include/gbiex.h
-@@ -255,6 +255,15 @@
+@@ -256,6 +256,15 @@
  /* Span markers, sticky between the two: flatten everything drawn inside. */
  #define PD_DLSPAN_FLAT_BEGIN  8
  #define PD_DLSPAN_FLAT_END    9

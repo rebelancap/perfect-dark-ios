@@ -27,9 +27,11 @@ for the shell's console bridge.
 
 Every other platform is unchanged.
 
+diff --git a/port/src/gexplusrom.c b/port/src/gexplusrom.c
+index 79673ec32..dc6763d2e 100644
 --- a/port/src/gexplusrom.c
 +++ b/port/src/gexplusrom.c
-@@ -231,12 +231,62 @@
+@@ -236,12 +236,62 @@ static Gfx *noticeText(Gfx *gdl, const char *text, s32 y)
  	return gdl;
  }
  
@@ -51,7 +53,7 @@ Every other platform is unchanged.
  	Gfx *gdl = g_NoticeGfx;
  	const s32 barw = 160;
  	const s32 fill = total > 0 ? barw * done / total : 0;
-+
+ 
 +#ifdef PLATFORM_IOS
 +	// The game thread is UIKit's main thread on iOS, and every caller of this
 +	// notice waits in a loop on it for seconds (the GoldenEye conversion, the
@@ -78,7 +80,7 @@ Every other platform is unchanged.
 +			g_GexPlusNoticeHeld++;
 +			return;
 +		}
- 
++
 +		if (held) {
 +			sysLogPrintf(LOG_NOTE, "gexplus: notice drawing again after %d calls held in the background (notice frames drawn %d, presents %llu)",
 +				held, g_GexPlusNoticeDrawn, pdAngleSwapCount());

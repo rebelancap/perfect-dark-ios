@@ -66,8 +66,9 @@ static const int kScanDepth = 4;
 // xblaScanForPackage()'s two "not this release" tests (D-070): added-content/
 // is shared, and the engine passes over the GoldenEye XBLA archive (an entry
 // under files/new/char/) and the Community Edition updater zip (gebean.h
-// GEBEANCE_DIFF_ENTRY) before it takes an archive for Perfect Dark's. A .rar is
-// never looked into, by the engine or here.
+// GEBEANCE_DIFF_ENTRY) before it takes an archive for Perfect Dark's - and,
+// since upstream v3.14.0, an archive holding a ROM patch (goldfinger64.zip).
+// A .rar is never looked into, by the engine or here.
 static NSString *const kGoldenEyeEntry = @"files/new/char/";
 static NSString *const kCeUpdateEntry  = @"CEUpdate/files.diff";
 // overlay 0046 (gebean.c GEBEAN_PKG_ENTRY / GEBEAN_PKG_NAME / GEBEAN_PKG_TITLE /
@@ -108,6 +109,14 @@ static BOOL pdArchiveHoldsGoldenEyePackage(NSString *path)
 	const char *p = path.fileSystemRepresentation;
 	return archiveFindEntry(p, kGoldenEyePackageEntry.UTF8String)
 	    || archiveFindEntry(p, kGoldenEyePackageName.UTF8String);
+}
+
+/** xblaimport.c / gexplusrom.c variantArchiveHasPatch(): an archive holding a ROM patch. */
+static BOOL pdArchiveHoldsRomPatch(NSString *path)
+{
+	const char *p = path.fileSystemRepresentation;
+	return archiveFindEntry(p, ".xdelta") || archiveFindEntry(p, ".vcdiff")
+	    || archiveFindEntry(p, ".bps") || archiveFindEntry(p, ".ips");
 }
 
 static BOOL sUnpacking;
@@ -219,12 +228,17 @@ static NSString *sUnpackNote;            // the last thing the engine's importer
 	return PDXblaNone;
 }
 
-/** An archive the engine's scan passes over because it is another release's. */
+/**
+ * An archive the engine's scan passes over because it is another release's -
+ * or, since upstream v3.14.0 (xblaimport.c), a GoldenEye ROM hack's patch
+ * passed around as an archive (goldfinger64.zip), which goes in the same folder.
+ */
 + (BOOL)isOtherRelease:(NSString *)path
 {
 	const char *p = path.fileSystemRepresentation;
 	return archiveFindEntry(p, kGoldenEyeEntry.UTF8String)
 	    || archiveFindEntry(p, kCeUpdateEntry.UTF8String)
+	    || pdArchiveHoldsRomPatch(path)
 	    || pdArchiveHoldsGoldenEyePackage(path);
 }
 
@@ -895,6 +909,12 @@ static NSString *const kGoldenEyeTree = @"files/new/char";
 // port/include/gexplusrom.h GEXPLUSROM_DIR and its CONVERT.txt stamp; overlay
 // 0043 puts the arenas in Caches/mods, an older build left them in Documents/mods.
 static NSString *const kArenasDir = @"GoldenEye Arenas";
+// gexplusrom.c's ROM hacks: geconvert.h GECONVERT_ROM_SIZE is the floor for the
+// hack's own ROM (Goldfinger 64's is 24 MB), VARIANT_ARCHIVE_MAX the ceiling for
+// an archive of its patch; the conversion's stamp names its source on its second
+// line, from $E (overlay 0053), and overlay 0053 puts it in Caches/mods.
+static const unsigned long long kHackArchiveMax = 128ULL << 20;
+static NSString *const kStampFrom = @"Converted from ";
 // STFS title ids at 0x360 of a package: Perfect Dark's and GoldenEye XBLA's.
 static const uint8_t kTitlePerfectDark[4] = { 0x58, 0x41, 0x09, 0xc2 };
 static const uint8_t kTitleGoldenEye[4]   = { 0x58, 0x41, 0x08, 0xa9 };
@@ -913,6 +933,12 @@ static const uint8_t kTitleGoldenEye[4]   = { 0x58, 0x41, 0x08, 0xa9 };
 	NSString *state;
 	if (self.kind == PDGoldenEyeRom) {
 		state = self.ready ? @"ready" : @"converted when the app next opens";
+	} else if (self.kind == PDGoldenEyeHack) {
+		// a patch is applied to the GoldenEye ROM; with none there is nothing to
+		// apply it to (gexplusrom.c variantFromPatch)
+		state = self.ready ? @"ready"
+			: self.needsRom ? @"needs the GoldenEye 007 ROM above"
+			: @"converted when the app next opens";
 	} else if (!PDDefBool(PDDefXblaGoldenEye)) {
 		// D-081: the switch row under this one is off - the engine does not
 		// look at the release at all, so it is not unpacked either
@@ -933,7 +959,7 @@ static const uint8_t kTitleGoldenEye[4]   = { 0x58, 0x41, 0x08, 0xa9 };
 
 @implementation PDXbla (GoldenEye)
 
-static PDGoldenEyeFind *sGeRom, *sGeXbla;     // main thread only
+static PDGoldenEyeFind *sGeRom, *sGeXbla, *sGeHack;     // main thread only
 static dispatch_queue_t sGeQueue;
 
 static NSData *pdHead(NSString *path, NSUInteger len)
@@ -966,6 +992,37 @@ static BOOL pdIsGoldenEyeArchive(NSString *path)
 	return pdIsArchiveExt(path) && archiveFindEntry(path.fileSystemRepresentation, kGoldenEyeEntry.UTF8String);
 }
 
+/** gexplusrom.c's ROM hack test for the hack's own ROM: bigger than GoldenEye's, a header the converter knows. */
+static NSString *pdHackRomName(NSString *path, unsigned long long size)
+{
+	if (size <= kGoldenEyeRomSize) {
+		return nil;
+	}
+	NSData *h = pdHead(path, 0x40);
+	const char *name = h.length == 0x40 ? geconvertHeaderVariantName(h.bytes, h.length) : NULL;
+	return name ? @(name) : nil;
+}
+
+/**
+ * gexPlusRomConvertVariants()'s three ways in, by the file alone: a patch by
+ * its name, an archive of one (a few MB, not a release), or the hack's ROM.
+ * A patch is only known to make a hack once it is applied, which is the
+ * engine's to do; the shell takes it on its name, as the engine looks at it.
+ */
+static BOOL pdIsHackSource(NSString *path, unsigned long long size, BOOL *isPatch)
+{
+	if (rompatchIsPatchName(path.lastPathComponent.fileSystemRepresentation)) {
+		*isPatch = YES;
+		return YES;
+	}
+	if (pdIsArchiveExt(path) && size <= kHackArchiveMax && pdArchiveHoldsRomPatch(path)) {
+		*isPatch = YES;
+		return YES;
+	}
+	*isPatch = NO;
+	return pdHackRomName(path, size) != nil;
+}
+
 static BOOL pdIsDir(NSString *path)
 {
 	BOOL d = NO;
@@ -988,6 +1045,42 @@ static NSString *pdScanRom(NSString *dir)
 		}
 	}
 	return nil;
+}
+
+static BOOL pdHackConverted(NSString *hit);
+
+/**
+ * gexPlusRomConvertVariants()'s scan: the top level of added-content/, files
+ * only. The engine converts from every source it finds, so the one shown is
+ * the first already converted, else the first in name order.
+ */
+static NSString *pdScanHack(NSString *dir, BOOL *isPatch)
+{
+	NSString *first = nil;
+	BOOL firstPatch = NO;
+	NSArray *names = [[NSFileManager.defaultManager contentsOfDirectoryAtPath:dir error:NULL]
+		sortedArrayUsingSelector:@selector(compare:)];
+	for (NSString *name in names) {
+		if ([name hasPrefix:@"."]) {
+			continue;
+		}
+		NSString *p = [dir stringByAppendingPathComponent:name];
+		NSDictionary *a = [NSFileManager.defaultManager attributesOfItemAtPath:p error:NULL];
+		BOOL patch = NO;
+		if (a && [a.fileType isEqualToString:NSFileTypeRegular] && a.fileSize > 0
+		    && pdIsHackSource(p, a.fileSize, &patch)) {
+			if (pdHackConverted(p)) {
+				*isPatch = patch;
+				return p;
+			}
+			if (!first) {
+				first = p;
+				firstPatch = patch;
+			}
+		}
+	}
+	*isPatch = firstPatch;
+	return first;
 }
 
 /** gebeanScan(): `archives` NO looks for an unpacked folder, YES for an archive. */
@@ -1029,6 +1122,38 @@ static BOOL pdArenasConverted(void)
 			stringByAppendingPathComponent:kArenasDir] stringByAppendingPathComponent:@"CONVERT.txt"];
 		if ([NSFileManager.defaultManager fileExistsAtPath:stamp]) {
 			return YES;
+		}
+	}
+	return NO;
+}
+
+/**
+ * Whether a hack's conversion was made from this file: its CONVERT.txt, in
+ * Caches/mods (overlay 0053) or Documents/mods, names it on its second line -
+ * "$E/added-content/<name>" since 0053 (gexplusrom.c variantCanonical()).
+ */
+static BOOL pdHackConverted(NSString *hit)
+{
+	NSString *docs = PDShell.shared.documentsPath, *caches = PDShell.shared.cachesPath;
+	char *realDocs = realpath(docs.fileSystemRepresentation, NULL);
+	char *realHit = realpath(hit.fileSystemRepresentation, NULL);
+	NSString *want = nil;
+	if (realDocs && realHit && !strncmp(realHit, realDocs, strlen(realDocs)) && realHit[strlen(realDocs)] == '/') {
+		want = [@"$E" stringByAppendingString:@(realHit + strlen(realDocs))];
+	} else if (realHit) {
+		want = @(realHit);
+	}
+	free(realDocs);
+	free(realHit);
+	for (int i = 0; want && geconvertVariantNameAt(i); i++) {
+		for (NSString *root in @[ caches, docs ]) {
+			NSString *stamp = [[[root stringByAppendingPathComponent:@"mods"]
+				stringByAppendingPathComponent:@(geconvertVariantNameAt(i))] stringByAppendingPathComponent:@"CONVERT.txt"];
+			NSArray *lines = [[NSString stringWithContentsOfFile:stamp encoding:NSUTF8StringEncoding error:NULL]
+				componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet];
+			if (lines.count >= 2 && [lines[1] isEqualToString:[kStampFrom stringByAppendingString:want]]) {
+				return YES;
+			}
 		}
 	}
 	return NO;
@@ -1085,7 +1210,8 @@ static PDGoldenEyeFind *pdFind(PDGoldenEyeKind kind, NSString *hit, NSString *ro
 		? [hit substringFromIndex:root.length + 1] : hit.lastPathComponent;
 	f.isFolder = pdIsDir(hit);
 	f.bytes = f.isFolder ? 0 : [NSFileManager.defaultManager attributesOfItemAtPath:hit error:NULL].fileSize;
-	f.ready = kind == PDGoldenEyeRom ? pdArenasConverted() : pdGeXblaUnpacked(hit, f.bytes);
+	f.ready = kind == PDGoldenEyeRom ? pdArenasConverted()
+		: kind == PDGoldenEyeHack ? pdHackConverted(hit) : pdGeXblaUnpacked(hit, f.bytes);
 	if (kind == PDGoldenEyeXbla && !f.isFolder) {
 		f.isPackage = !pdIsGoldenEyeArchive(hit);
 		int need = 0, free = 0;
@@ -1097,8 +1223,8 @@ static PDGoldenEyeFind *pdFind(PDGoldenEyeKind kind, NSString *hit, NSString *ro
 	return f;
 }
 
-/** Both scans, any thread. */
-static void pdScanGoldenEye(PDGoldenEyeFind **rom, PDGoldenEyeFind **xbla)
+/** All three scans, any thread. */
+static void pdScanGoldenEye(PDGoldenEyeFind **rom, PDGoldenEyeFind **xbla, PDGoldenEyeFind **hack)
 {
 	NSString *docs = PDShell.shared.documentsPath;
 	NSString *drop = PDXbla.dropDir;
@@ -1127,11 +1253,18 @@ static void pdScanGoldenEye(PDGoldenEyeFind **rom, PDGoldenEyeFind **xbla)
 		}
 	}
 	*xbla = pdFind(PDGoldenEyeXbla, hit, root);
+
+	// A ROM hack (Goldfinger 64): added-content/ only, as the engine looks.
+	BOOL isPatch = NO;
+	hit = pdScanHack(drop, &isPatch);
+	*hack = pdFind(PDGoldenEyeHack, hit, drop);
+	(*hack).isPatch = hit && isPatch;
+	(*hack).needsRom = (*hack).isPatch && !(*rom).found;
 }
 
 + (PDGoldenEyeFind *)cachedGoldenEye:(PDGoldenEyeKind)kind
 {
-	return kind == PDGoldenEyeRom ? sGeRom : sGeXbla;
+	return kind == PDGoldenEyeRom ? sGeRom : kind == PDGoldenEyeHack ? sGeHack : sGeXbla;
 }
 
 + (void)warmGoldenEyeScan:(void (^)(void))done
@@ -1143,14 +1276,15 @@ static void pdScanGoldenEye(PDGoldenEyeFind **rom, PDGoldenEyeFind **xbla)
 	(void)PDXbla.dropDir; // made here, on the main thread, before the queue reads it
 	dispatch_async(sGeQueue, ^{
 		NSTimeInterval t0 = NSDate.timeIntervalSinceReferenceDate;
-		PDGoldenEyeFind *rom = nil, *xbla = nil;
-		pdScanGoldenEye(&rom, &xbla);
+		PDGoldenEyeFind *rom = nil, *xbla = nil, *hack = nil;
+		pdScanGoldenEye(&rom, &xbla, &hack);
 		NSTimeInterval took = NSDate.timeIntervalSinceReferenceDate - t0;
 		dispatch_async(dispatch_get_main_queue(), ^{
 			sGeRom = rom;
 			sGeXbla = xbla;
-			NSLog(@"perfectdark: [geplus] scan (%.0f ms): rom=%@ | xbla=%@",
-				took * 1000.0, rom.rowText, xbla.rowText);
+			sGeHack = hack;
+			NSLog(@"perfectdark: [geplus] scan (%.0f ms): rom=%@ | xbla=%@ | hack=%@",
+				took * 1000.0, rom.rowText, xbla.rowText, hack.rowText);
 			if (done) {
 				done();
 			}
@@ -1179,6 +1313,30 @@ static void pdScanGoldenEye(PDGoldenEyeFind **rom, PDGoldenEyeFind **xbla)
 	const BOOL geRom = n64 && pdIsGoldenEyeUsRom(path, size);
 	const BOOL geXbla = !n64 && !stfs && (pdIsGoldenEyeArchive(path) || pdArchiveHoldsGoldenEyePackage(path));
 	const BOOL gePackage = stfs && pdIsGoldenEyePackageFile(path);
+	BOOL hackPatch = NO;
+	const BOOL hack = !geRom && !stfs && pdIsHackSource(path, size, &hackPatch);
+
+	if (kind == PDGoldenEyeHack) {
+		if (hack) {
+			return nil;
+		}
+		if (geRom) {
+			return @"That is the GoldenEye 007 N64 ROM. Add it with the GoldenEye 007 ROM row.";
+		}
+		if (geXbla || gePackage) {
+			return @"That is the GoldenEye XBLA release. Add it with the GoldenEye XBLA row.";
+		}
+		if (n64) {
+			return @"That is an N64 ROM, but not Goldfinger 64.";
+		}
+		return @"That is not Goldfinger 64. It comes as goldfinger64.zip, as the patch inside it "
+		        "(.xdelta), or as the Goldfinger 64 ROM already patched.";
+	}
+	if (hack) {
+		return hackPatch ? @"That is a ROM patch. A GoldenEye ROM hack's patch (goldfinger64.zip, or the .xdelta in it) "
+		                   "goes in with the Goldfinger 64 row."
+		                 : @"That is Goldfinger 64, a GoldenEye ROM hack. Add it with the Goldfinger 64 row.";
+	}
 
 	if (kind == PDGoldenEyeRom) {
 		if (geRom) {
@@ -1265,18 +1423,20 @@ static void pdScanGoldenEye(PDGoldenEyeFind **rom, PDGoldenEyeFind **xbla)
 	p.delegate = keep;
 	p.allowsMultipleSelection = NO;
 	[vc presentViewController:p animated:YES completion:nil];
-	NSLog(@"perfectdark: [geplus] presenting the document picker (%@)", kind == PDGoldenEyeRom ? @"rom" : @"xbla");
+	NSLog(@"perfectdark: [geplus] presenting the document picker (%@)",
+		kind == PDGoldenEyeRom ? @"rom" : kind == PDGoldenEyeHack ? @"hack" : @"xbla");
 }
 
 + (void)adoptGoldenEye:(PDGoldenEyeKind)kind
              pickedURL:(NSURL *)url
                   done:(void (^)(NSString *, NSString *))done
 {
-	NSString *what = kind == PDGoldenEyeRom ? @"GoldenEye 007 ROM" : @"GoldenEye XBLA release";
+	NSString *what = kind == PDGoldenEyeRom ? @"GoldenEye 007 ROM"
+		: kind == PDGoldenEyeHack ? @"Goldfinger 64 file" : @"GoldenEye XBLA release";
 	BOOL scoped = [url startAccessingSecurityScopedResource];
 	NSString *problem = [self goldenEyeProblemWithFile:url.path expecting:kind];
-	NSLog(@"perfectdark: [geplus] picked %@ for the %@ row: %@",
-		url.lastPathComponent, kind == PDGoldenEyeRom ? @"rom" : @"xbla", problem ?: @"accepted");
+	NSLog(@"perfectdark: [geplus] picked %@ for the %@ row: %@", url.lastPathComponent,
+		kind == PDGoldenEyeRom ? @"rom" : kind == PDGoldenEyeHack ? @"hack" : @"xbla", problem ?: @"accepted");
 	if (problem) {
 		if (scoped) {
 			[url stopAccessingSecurityScopedResource];
@@ -1292,9 +1452,9 @@ static void pdScanGoldenEye(PDGoldenEyeFind **rom, PDGoldenEyeFind **xbla)
 	if (!old) {
 		// the background scan has not landed yet: this one is the player's own
 		// action, so it may wait for the answer
-		PDGoldenEyeFind *rom = nil, *xbla = nil;
-		pdScanGoldenEye(&rom, &xbla);
-		old = kind == PDGoldenEyeRom ? rom : xbla;
+		PDGoldenEyeFind *rom = nil, *xbla = nil, *hack = nil;
+		pdScanGoldenEye(&rom, &xbla, &hack);
+		old = kind == PDGoldenEyeRom ? rom : kind == PDGoldenEyeHack ? hack : xbla;
 	}
 	// Never over the top of a file of another kind that happens to share the
 	// name: the copy gets a name of its own instead ("name 2.7z").
@@ -1357,6 +1517,15 @@ static void pdScanGoldenEye(PDGoldenEyeFind **rom, PDGoldenEyeFind **xbla)
 	if (kind == PDGoldenEyeRom) {
 		msg = @"The next time you open the app, GoldenEye's missions and arenas are converted from it "
 		       "(a few seconds, once). Then choose GE Plus in the Perfect Menu.";
+	} else if (kind == PDGoldenEyeHack) {
+		msg = @"The next time you open the app, Goldfinger 64's missions and arenas are converted from it "
+		       "(a few seconds, once). Then choose Goldfinger 64 in the Perfect Menu.";
+		BOOL isPatch = NO;
+		pdIsHackSource(dst, [NSFileManager.defaultManager attributesOfItemAtPath:dst error:NULL].fileSize, &isPatch);
+		if (isPatch && !sGeRom.found) {
+			msg = [msg stringByAppendingString:@" The patch is applied to your GoldenEye 007 (US) ROM, so add "
+			                                    "that too with the GoldenEye 007 ROM row."];
+		}
 	} else {
 		msg = @"The next time you open the app it is unpacked once into the app's Caches folder "
 		       "(about 400 MB written; keep 1 GB free). GE Plus then draws GoldenEye's HD art "
@@ -1404,16 +1573,19 @@ long long pdIosAvailableBytes(const char *path)
 + (NSString *)goldenEyeStateLines
 {
 	NSMutableString *s = [NSMutableString string];
-	if (!sGeRom || !sGeXbla) {
+	if (!sGeRom || !sGeXbla || !sGeHack) {
 		[s appendString:@"ge_scan=pending\n"];
 		return s;
 	}
-	NSArray *pairs = @[ @[ @"ge_rom", sGeRom ], @[ @"ge_xbla", sGeXbla ] ];
+	NSArray *pairs = @[ @[ @"ge_rom", sGeRom ], @[ @"ge_xbla", sGeXbla ], @[ @"ge_hack", sGeHack ] ];
 	for (NSArray *pair in pairs) {
 		NSString *k = pair[0];
 		PDGoldenEyeFind *f = pair[1];
 		[s appendFormat:@"%@_found=%d\n%@_file=%@\n%@_ready=%d\n%@_row=%@\n",
 			k, (int)f.found, k, f.relativePath ?: @"-", k, (int)f.ready, k, f.rowText];
+		if (f.kind == PDGoldenEyeHack) {
+			[s appendFormat:@"ge_hack_form=%@\n", !f.found ? @"none" : f.isPatch ? @"patch" : @"rom"];
+		}
 		if (f.kind == PDGoldenEyeXbla) {
 			[s appendFormat:@"ge_xbla_form=%@\nge_xbla_need_mb=%d\nge_xbla_switch=%d\n",
 				!f.found ? @"none" : f.isFolder ? @"folder" : f.isPackage ? @"package" : @"archive", f.needMb,

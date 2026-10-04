@@ -27,20 +27,20 @@ decode is wrapped at its five call sites for the same reason.
 left over. It goes to zero exactly when the game stops making the rate.
 
 diff --git a/port/fast3d/gfx_pc.cpp b/port/fast3d/gfx_pc.cpp
-index c74068b37..ac253862f 100644
+index 934f4d252..91299e85f 100644
 --- a/port/fast3d/gfx_pc.cpp
 +++ b/port/fast3d/gfx_pc.cpp
-@@ -38,6 +38,9 @@
- #include "menuimage.h"
+@@ -41,6 +41,9 @@
  #include "gfx_texscale.h"
  #include "gfx_post.h"
+ #include "gfxmesh.h"
 +#ifdef PD_IOS_PROFILER
 +#include "pd_frame_prof.h"
 +#endif
  
  uintptr_t gfxFramebuffer;
  
-@@ -1761,7 +1764,23 @@ static void gfx_replacement_alpha(uint8_t* rep, int32_t rep_width, int32_t rep_h
+@@ -1857,7 +1860,23 @@ static void gfx_replacement_alpha(uint8_t* rep, int32_t rep_width, int32_t rep_h
      }
  }
  
@@ -64,7 +64,7 @@ index c74068b37..ac253862f 100644
      LoadedTexture& loaded_texture = rdp.loaded_texture[rdp.texture_tile[tile].tmem];
      const uint8_t fmt = rdp.texture_tile[tile].fmt;
      const uint8_t siz = rdp.texture_tile[tile].siz;
-@@ -5467,6 +5486,12 @@ uint32_t num_dls = 0;
+@@ -8657,6 +8676,12 @@ uint32_t num_dls = 0;
  
  extern "C" void gfx_run(Gfx* commands) {
      ++num_dls;
@@ -77,15 +77,17 @@ index c74068b37..ac253862f 100644
      gfx_sp_reset();
  
      // puts("New frame");
-@@ -5489,8 +5514,16 @@ extern "C" void gfx_run(Gfx* commands) {
-     rendering_state.scissor = {};
+@@ -8680,10 +8705,18 @@ extern "C" void gfx_run(Gfx* commands) {
      gfx_mark_state_dirty();
      gfx_readable_reset();
+     gfx_mesh_start_frame();
 +#ifdef PD_IOS_PROFILER
 +    pdProfEnd(PDPROF_ACQUIRE);
 +    pdProfBegin(PDPROF_GFXDL);
 +#endif
      gfx_run_dl(commands);
+     gfx_mesh_flush();
+     mesh_cur = NULL;
      gfx_flush_for(GFX_FLUSH_OTHER);
 +#ifdef PD_IOS_PROFILER
 +    pdProfEnd(PDPROF_GFXDL);
@@ -94,7 +96,7 @@ index c74068b37..ac253862f 100644
      gfxFramebuffer = 0;
  
      if (game_renders_to_framebuffer) {
-@@ -5523,6 +5556,10 @@ extern "C" void gfx_run(Gfx* commands) {
+@@ -8716,6 +8749,10 @@ extern "C" void gfx_run(Gfx* commands) {
          gfx_pre_swap_callback();
      }
  
@@ -105,7 +107,7 @@ index c74068b37..ac253862f 100644
      gfx_wapi->swap_buffers_begin();
  }
  
-@@ -5579,8 +5616,15 @@ extern "C" int gfx_occlusion_result(int slot) {
+@@ -8772,8 +8809,15 @@ extern "C" int gfx_occlusion_result(int slot) {
  
  extern "C" void gfx_end_frame(void) {
      if (!dropped_frame) {
@@ -122,7 +124,7 @@ index c74068b37..ac253862f 100644
  }
  
 diff --git a/port/fast3d/gfx_sdl2.cpp b/port/fast3d/gfx_sdl2.cpp
-index 74340b4aa..13d4df7c4 100644
+index 56df84d34..57cc42ac2 100644
 --- a/port/fast3d/gfx_sdl2.cpp
 +++ b/port/fast3d/gfx_sdl2.cpp
 @@ -28,6 +28,10 @@ extern "C" int pdAngleGetSwapInterval(void);
@@ -136,7 +138,7 @@ index 74340b4aa..13d4df7c4 100644
  static SDL_Window* wnd;
  static SDL_GLContext ctx;
  static SDL_Renderer* renderer;
-@@ -489,10 +493,25 @@ static void gfx_sdl_swap_buffers_begin(void) {
+@@ -498,10 +502,25 @@ static void gfx_sdl_swap_buffers_begin(void) {
      // says the next frame is due, and presents once. A 0 answer means the app
      // is backgrounded: skip the present rather than swap into a CAMetalLayer
      // drawable the system has taken back.
@@ -318,10 +320,10 @@ index da6d3f44d..d3d043ceb 100644
  
  void schedInitArtifacts(void)
 diff --git a/port/src/xblatex.c b/port/src/xblatex.c
-index 190c9031a..a3544d0b6 100644
+index f7b834266..618ba3e88 100644
 --- a/port/src/xblatex.c
 +++ b/port/src/xblatex.c
-@@ -144,6 +144,23 @@ static u32 xblaTexBE32(const u8 *p)
+@@ -145,6 +145,23 @@ static u32 xblaTexBE32(const u8 *p)
  
  static u8 *xblaTexDecode(u32 record, s32 *outWidth, s32 *outHeight);
  
@@ -345,7 +347,7 @@ index 190c9031a..a3544d0b6 100644
  static void xblaTexCloseUp(void)
  {
  	x360StfsStreamClose(&stream);
-@@ -997,7 +1014,7 @@ u8 *xblaTexDecodeRecord(u32 record, s32 *outWidth, s32 *outHeight)
+@@ -998,7 +1015,7 @@ u8 *xblaTexDecodeRecord(u32 record, s32 *outWidth, s32 *outHeight)
  		return NULL;
  	}
  
@@ -354,7 +356,7 @@ index 190c9031a..a3544d0b6 100644
  
  	SDL_UnlockMutex(lock);
  
-@@ -1272,7 +1289,7 @@ s32 xblaTexRecordIsSoft(u32 record)
+@@ -1274,7 +1291,7 @@ s32 xblaTexRecordIsSoft(u32 record)
  	if (softRecord[record] == XBLATEX_SOFT_UNKNOWN) {
  		// Decoded once here and thrown away; the render thread decodes it
  		// again when the list draws, which it would have done anyway.
@@ -363,7 +365,7 @@ index 190c9031a..a3544d0b6 100644
  
  		if (!rgba) {
  			SDL_UnlockMutex(lock);
-@@ -1338,7 +1355,8 @@ const u8 *xblaTexRecordAlphaMap(u32 record, s32 *outSize)
+@@ -1340,7 +1357,8 @@ const u8 *xblaTexRecordAlphaMap(u32 record, s32 *outSize)
  	}
  
  	if (!alphaTried[record]) {
@@ -373,7 +375,7 @@ index 190c9031a..a3544d0b6 100644
  
  		alphaTried[record] = 1;
  
-@@ -1560,7 +1578,7 @@ u8 *xblaTexLoadReplacement(const void *addr, s32 *outWidth, s32 *outHeight)
+@@ -1562,7 +1580,7 @@ u8 *xblaTexLoadReplacement(const void *addr, s32 *outWidth, s32 *outHeight)
  		return NULL;
  	}
  
@@ -382,7 +384,7 @@ index 190c9031a..a3544d0b6 100644
  
  	SDL_UnlockMutex(lock);
  
-@@ -1607,7 +1625,7 @@ u8 *xblaTexLoadNumbered(s32 texturenum, s32 *outWidth, s32 *outHeight)
+@@ -1609,7 +1627,7 @@ u8 *xblaTexLoadNumbered(s32 texturenum, s32 *outWidth, s32 *outHeight)
  		return NULL;
  	}
  

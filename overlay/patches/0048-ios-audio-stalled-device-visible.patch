@@ -21,9 +21,11 @@ Also: audioInit()'s "Audio.RateMatchMaxPct=N is above the ceiling" line could
 never fire - configRegisterInt() clamps the value to its maximum as pd.ini is
 read - so it is removed and the comment says where the clamp really is.
 
+diff --git a/port/src/audio.c b/port/src/audio.c
+index 0b456cf27..74d53077e 100644
 --- a/port/src/audio.c
 +++ b/port/src/audio.c
-@@ -213,6 +213,17 @@
+@@ -213,6 +213,17 @@ static float rateStep = 1.0f;     /* input frames per output frame */
  static float rateInteg = 0.0f;
  static float rateLevel = -1.0f;   /* filtered queue level; <0 = not yet seeded */
  static s32 rateDropping = 0;      /* a burst is being dropped back to the setpoint */
@@ -41,7 +43,7 @@ read - so it is removed and the comment says where the clamp really is.
  static s16 *fadeBuf = NULL;
  static u32 fadeBufSize = 0;
  /** Resyncs (D-078): re-primes after an underrun, burst drops, samples dropped. */
-@@ -440,12 +451,10 @@
+@@ -440,12 +451,10 @@ s32 audioInit(void)
  	}
  	// The rate matcher's authority has a hard ceiling (D-078). A pd.ini from
  	// 1.0.1.1 or earlier carries 10, which is what let a hitch be heard as
@@ -58,7 +60,7 @@ read - so it is removed and the comment says where the clamp really is.
  #endif
  
  	SDL_AudioSpec want, have;
-@@ -563,6 +572,7 @@
+@@ -563,6 +572,7 @@ void audioEndFrame(void)
  				audioIosQueueSilence(setpoint - inSamples);
  				rateLevel = (float)setpoint;
  				rateDropping = 0;
@@ -66,7 +68,7 @@ read - so it is removed and the comment says where the clamp really is.
  				ratePrev[0] = ratePrev[1] = 0;
  				ratePhase = 0.0f;
  				fade = 1;
-@@ -578,6 +588,7 @@
+@@ -578,6 +588,7 @@ void audioEndFrame(void)
  					return;
  				}
  				rateDropping = 0;
@@ -74,7 +76,7 @@ read - so it is removed and the comment says where the clamp really is.
  				audioIosQueueSilence(setpoint - queued - inSamples);
  				rateLevel = (float)setpoint;
  				ratePrev[0] = ratePrev[1] = 0;
-@@ -586,6 +597,8 @@
+@@ -586,6 +597,8 @@ void audioEndFrame(void)
  			} else if (g_PdAudioPushes > 0 && queued + inSamples > PD_AUDIO_HIGHMARK) {
  				g_PdAudioResyncOver++;
  				rateDropping = 1;
