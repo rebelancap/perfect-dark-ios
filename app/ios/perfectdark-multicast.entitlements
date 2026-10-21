@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Used ONLY when PD_MULTICAST=1 (scripts/gen-app-project.sh, D-106). The
+  multicast entitlement lets the LAN page's room finder send its UDP broadcast
+  (netlan.c: 255.255.255.255 to Net.Port and the three after it). Apple grants
+  it per team on request; until the App ID and the provisioning profile carry
+  it, a build that asks for it does not sign, which is why it is opt-in.
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.developer.networking.multicast</key>
+	<true/>
+</dict>
+</plist>

@@ -282,7 +282,12 @@ STATE=""
 for i in $(seq 1 60); do
 	sleep 2
 	STATE="$(bridge state)"
-	case "$STATE" in *engine=running*) break ;; esac
+	# engine=running is set before pdEngineMain() and the bridge can answer
+	# at frames=0, mid fade-in from black: v3.15.1's boot reached the content
+	# check on a near-black Institute (bright=0). Wait for 120 frames, as
+	# vision-validate.sh does (docs/build.md §Traps v3.15.1).
+	FR="$(echo "$STATE" | awk -F= '$1=="frames" {print $2; exit}')"
+	case "$STATE" in *engine=running*) [ "${FR:-0}" -ge 120 ] 2>/dev/null && break ;; esac
 done
 [ -n "$STATE" ] || fail "console bridge :$PORT never answered (is this a PD_PUBLIC build?)"
 case "$STATE" in *frames=*) ;; *) fail "bridge answered but the engine never reached a frame: $STATE" ;; esac

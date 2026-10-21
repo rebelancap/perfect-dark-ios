@@ -75,6 +75,11 @@ int playerIosGetAimMode(void);
 // right hand's gun has a second function, its weapon number + function (0/1),
 // and whether the active menu (the weapon wheel) is open + its slot (4 = centre).
 int playerIosOnGoldenEyeLevel(void);
+/** Online round 2 (D-105, overlay 0060): the chat chip's engine side. Available
+ *  while an online match is live; Open opens the match's chat line as the chat
+ *  key does (the software keyboard comes up). Call Open at a frame boundary. */
+int netHudIosChatAvailable(void);
+int netHudIosChatOpen(void);
 int playerIosGunHasSecondary(void);
 int playerIosGunState(int *function);
 int playerIosActiveMenu(int *slot);

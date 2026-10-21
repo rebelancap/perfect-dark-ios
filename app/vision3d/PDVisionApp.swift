@@ -46,6 +46,15 @@ final class PDAppModel: ObservableObject {
     /// The 3D settings sheet (M6). Flipped by the ornament's gear and by
     /// PD_SetSettingsSheet, which is how the bridge and the 3D exit reach it.
     @Published var settingsSheet = false
+    /// VR R0 (charter D1): the live immersion style of the `PDVR` space ONLY.
+    /// The `PD-3D` space keeps its own constant `.mixed` declaration, untouched.
+    @Published var vrStyle: ImmersionStyle = .mixed
+}
+
+/// VR R0: the bridge's `vr style mixed|full` flips the PDVR space's live style.
+@_cdecl("PD_VRPushStyle")
+func PD_VRPushStyle(_ full: Int32) {
+    DispatchQueue.main.async { PDAppModel.shared.vrStyle = (full != 0) ? .full : .mixed }
 }
 
 /// Called from PDHostViewController.m (pdVision3dSetMode) to flip the SwiftUI
@@ -235,8 +244,14 @@ struct PDRootView: View {
                     model.spaceBusy = true
                     defer { model.spaceBusy = false }
                     if on {
-                        let r = await openImmersiveSpace(id: "PD-3D")
-                        NSLog("perfectdark: [3d] openImmersiveSpace -> \(String(describing: r))")
+                        // VR R0 (charter D1): WHICH space opens is app logic;
+                        // `PD-3D`'s own declaration is never touched. The test
+                        // variants exist only for the R0a contract measurement.
+                        let vrIds = ["PDVR", "PDVRTestA", "PDVRTestB"]
+                        let spaceId = (pdVisionVRWanted() != 0)
+                            ? vrIds[max(0, min(2, Int(pdVisionVRSpaceIndex())))] : "PD-3D"
+                        let r = await openImmersiveSpace(id: spaceId)
+                        NSLog("perfectdark: [3d] openImmersiveSpace(\(spaceId)) -> \(String(describing: r))")
                         if case .error = r {
                             // Roll the shell back out of 3D rather than leave it
                             // believing it is in a space that never opened.
@@ -260,6 +275,8 @@ struct PDRootView: View {
 
 @main
 struct PDVisionApp: App {
+    /// VR R0: the PDVR space's style selection is bound to this.
+    @ObservedObject private var model = PDAppModel.shared
     /// 1280x720 unless `PD_VISION_WINDOW_SIZE=WxH` is in the environment
     /// (`SIMCTL_CHILD_PD_VISION_WINDOW_SIZE` from simctl). A screenshot
     /// instrument only: README captures of the simulated room want a larger
@@ -304,5 +321,53 @@ struct PDVisionApp: App {
         // with __BUG_IN_CLIENT__. The Surroundings Dimming slider (M6) is the
         // in-app replacement for Crown dimming.
         .immersionStyle(selection: .constant(.mixed), in: .mixed)
+
+        // ---- VR R0 (docs/VR-CHARTER.md D1, docs/VR-R0-FINDINGS.md R0a) ------
+        // SIBLING spaces, so the immersion-style/present contract is MEASURED
+        // on this SDK instead of inherited. `PD-3D` above is byte-for-byte as it
+        // was: the family lesson is that WIDENING an existing space's style set
+        // breaks present, not that extra spaces are unsafe.
+        //
+        // PDVR: the shipping candidate, a two-member style set switched LIVE
+        // while the space is open (the surroundings choice, charter D3/Q-VR5).
+        ImmersiveSpace(id: "PDVR") {
+            CompositorLayer(configuration: PDCompositorConfiguration()) { layerRenderer in
+                NSLog("perfectdark: [vr] CompositorLayer ready (PDVR) — spawning the VR thread")
+                let t = Thread {
+                    pdVisionVRImmersiveRun(Unmanaged.passUnretained(layerRenderer).toOpaque())
+                }
+                t.name = "PD-VR"
+                t.stackSize = 2 << 20
+                t.start()
+            }
+        }
+        .immersionStyle(selection: $model.vrStyle, in: .mixed, .full)
+
+        // The two constant-style controls for the A/B (R0a only).
+        ImmersiveSpace(id: "PDVRTestA") {
+            CompositorLayer(configuration: PDCompositorConfiguration()) { layerRenderer in
+                NSLog("perfectdark: [vr] CompositorLayer ready (PDVRTestA, .mixed)")
+                let t = Thread {
+                    pdVisionVRImmersiveRun(Unmanaged.passUnretained(layerRenderer).toOpaque())
+                }
+                t.name = "PD-VR"
+                t.stackSize = 2 << 20
+                t.start()
+            }
+        }
+        .immersionStyle(selection: .constant(.mixed), in: .mixed)
+
+        ImmersiveSpace(id: "PDVRTestB") {
+            CompositorLayer(configuration: PDCompositorConfiguration()) { layerRenderer in
+                NSLog("perfectdark: [vr] CompositorLayer ready (PDVRTestB, .full)")
+                let t = Thread {
+                    pdVisionVRImmersiveRun(Unmanaged.passUnretained(layerRenderer).toOpaque())
+                }
+                t.name = "PD-VR"
+                t.stackSize = 2 << 20
+                t.start()
+            }
+        }
+        .immersionStyle(selection: .constant(.full), in: .full)
     }
 }

@@ -1,0 +1,107 @@
+Subject: iOS menus: a tap on an open dropdown picks the option under it
+
+Online round 2 (D-105). A dropdown (MENUITEMTYPE_DROPDOWN) opens a list over
+the dialog; a desktop mouse moves its highlight with the wheel and a click
+anywhere confirms the highlighted option. D-083 gave the touch pointer the
+wheel (a vertical drag), but a TAP - what a phone player does to a list of
+options - confirmed whatever was highlighted, so tapping "Favorite Food" on
+Online Lobbies' new-account Security Questions closed the list with nothing
+chosen and moved the focus to the row under the finger. The account could not
+be made by touch without knowing to drag first.
+
+menuitemDropdownOverlay() records where it drew the open list (iOS only), and
+menuitemDropdownTick() maps a touch click inside it to the option under it
+with the render's own offset map (menuitem0f0e5d2c, as 0051 does for a LIST),
+before the list tick confirms it; a tap outside the open list closes it with
+nothing changed. Pads, the wheel and the desktop are untouched.
+
+Entirely inside PLATFORM_IOS.
+
+--- a/src/game/menuitem.c
++++ b/src/game/menuitem.c
+@@ -1068,12 +1068,71 @@
+ 
+ 	return gdl;
+ }
++
++#ifdef PLATFORM_IOS
++// Where the open dropdown's list was last drawn (menuitemDropdownOverlay), in
++// the units the menu's pointer reports: the touch click maps onto it (overlay
++// 0062). Only one dropdown is ever open.
++static struct menuitem *s_IosDropdownItem = NULL;
++static s32 s_IosDropdownX, s_IosDropdownY, s_IosDropdownW, s_IosDropdownH;
++#endif
+ 
+ bool menuitemDropdownTick(struct menuitem *item, struct menudialog *dialog, struct menuinputs *inputs, u32 tickflags, union menuitemdata *data)
+ {
+ 	u32 stack;
+ 
+ 	if ((tickflags & MENUTICKFLAG_ITEMISFOCUSED) && item->handler) {
++#ifdef PLATFORM_IOS
++		// A finger's click on an open dropdown (Online round 2, D-105). A
++		// desktop mouse picks an option with the wheel and confirms with a
++		// click anywhere; a tap chose whatever was highlighted, so a touch
++		// player who tapped "Favorite Food" on the new account's Security
++		// Questions got the list closed with nothing chosen. The tap now
++		// chooses the option under it - the list's own render geometry,
++		// recorded by menuitemDropdownOverlay - and a tap outside the list
++		// closes it without a change. Pads and the wheel are untouched.
++		if (dialog->dimmed && item == dialog->focuseditem && inputs->select && inputs->mouseheld
++				&& g_MenuUsingMouse && inputIosPointerIsActive()
++				&& s_IosDropdownItem == item && s_IosDropdownH > 0) {
++			union handlerdata hd;
++
++			// the option height the list was drawn with: g_LineHeight is
++			// whatever the last list or render left it at (44 on Security
++			// Questions, from the page's other list), not this dropdown's
++			if (item->flags & MENUITEMFLAG_LIST_CUSTOMRENDER) {
++				item->handler(MENUOP_GETOPTIONHEIGHT, item, &hd);
++				g_LineHeight = hd.dropdown.value;
++			} else {
++				g_LineHeight = LINEHEIGHT;
++			}
++
++			if (inputs->mousex >= s_IosDropdownX && inputs->mousex < s_IosDropdownX + s_IosDropdownW
++					&& inputs->mousey >= s_IosDropdownY && inputs->mousey < s_IosDropdownY + s_IosDropdownH) {
++				const s32 half = (s_IosDropdownH / 2) / g_LineHeight * g_LineHeight;
++				const s32 rel = inputs->mousey - s_IosDropdownY - half + data->list.curoffsety;
++
++				item->handler(MENUOP_GETOPTIONCOUNT, item, &hd);
++
++				if (rel >= 0 && hd.dropdown.value > 0) {
++					const s32 idx = menuitem0f0e5d2c(rel, item);
++
++
++					if (idx >= 0 && idx < (s32)hd.dropdown.value && idx != data->list.index) {
++						data->list.index = idx;
++						data->list.targetoffsety = menuitemListGetOffsetY(idx, item);
++						hd.list.value = idx;
++						item->handler(MENUOP_LISTITEMFOCUS, item, &hd);
++					}
++				}
++			} else {
++				// outside the list: close it, nothing chosen
++				dialog->dimmed = false;
++				inputs->select = 0;
++				menuPlaySound(MENUSOUND_TOGGLEOFF);
++				return true;
++			}
++		}
++#endif
+ 		if (dialog->dimmed && item == dialog->focuseditem) {
+ 			menuitemListTick(item, inputs, tickflags, data);
+ 
+@@ -1194,6 +1253,13 @@
+ 			context.y = dialog->y + dialog->height - context.height + 2;
+ 		}
+ 
++#ifdef PLATFORM_IOS
++		s_IosDropdownItem = item;
++		s_IosDropdownX = context.x;
++		s_IosDropdownY = context.y;
++		s_IosDropdownW = context.width;
++		s_IosDropdownH = context.height;
++#endif
+ 		gdl = menuitemListRender(gdl, &context);
+ 	}
+ 

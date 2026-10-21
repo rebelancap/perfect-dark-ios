@@ -122,6 +122,10 @@ work/vision3d-glare/
 # Release staging (the IPAs are the ones the hub serves; they are not tracked)
 dist/
 
+# Blobless study clone of the PD VR donor fork (docs/VR-DONOR-MAP.md).
+# work/perfect_dark_VR-PROVENANCE.md says how to re-fetch it.
+work/perfect_dark_VR/
+
 # ---- public tree only: development process docs, kept local -----------------
 CLAUDE.md
 STATUS.md
@@ -141,3 +145,7 @@ work/gamedata-PROVENANCE.md
 work/vision3d-*/
 scripts/readme-shots.sh
 scripts/crashfix-verify.sh
+# VR mode development docs and round gates (process, kept local)
+docs/VR-*.md
+scripts/vr-*-verify.sh
+work/perfect_dark_VR-PROVENANCE.md

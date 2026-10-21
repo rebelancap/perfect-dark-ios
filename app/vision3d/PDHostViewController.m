@@ -18,6 +18,7 @@
 //     than sm64coopdx's, which relies on SDL's microsecond pump. Do not
 //     "optimise" the pacer's wait back into a semaphore on visionOS.
 #import "PDVision3D.h"
+#import "PDVisionVR.h"   // VR R0: the third mode rides this file's sequencing
 
 #if TARGET_OS_VISION
 
@@ -212,6 +213,12 @@ static void pdVisionCurtain(int up)
 			pdCurtainView = v;
 		}
 		pdCurtainView.frame = win.bounds;
+		// VR R0: the same curtain, saying which mode the picture went to.
+		for (UIView *sv in pdCurtainView.subviews) {
+			if ([sv isKindOfClass:UILabel.class]) {
+				((UILabel *)sv).text = pdVisionVRWanted() ? @"Playing in VR" : @"Playing in 3D";
+			}
+		}
 		[win addSubview:pdCurtainView];
 		// The touch layer stays ON TOP of the curtain and keeps working: a
 		// pinch in the left half of the card is still the floating stick when
@@ -423,6 +430,7 @@ static void pdVision3dApplyMode(int on)
 		// 0 is the eye (patch 0031).
 		if (!pdAngleSet3DActive(1)) {
 			NSLog(@"perfectdark: [3d] ENTER ABORTED — the eye targets did not come up");
+			pdVisionVRNoteExited();
 			return;
 		}
 		// CURTAIN BEFORE THE SPACE: from this instant the window's last drawn
@@ -507,6 +515,8 @@ static void pdVision3dApplyMode(int on)
 		[ov reassertTouchability];
 		NSLog(@"perfectdark: [3d] exit finalized (parked=%d curtain=%d cycles=%d)",
 			pdParked, pdCurtain, pdParkCycles);
+		// VR R0: whichever space this was, the next `3d on` opens PD-3D.
+		pdVisionVRNoteExited();
 	}
 }
 

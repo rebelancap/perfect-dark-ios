@@ -8,3 +8,4 @@
 // target ONLY. PDVision3D.h is self-gating on TARGET_OS_VISION, and nothing in
 // the iOS target includes either file.
 #import "PDVision3D.h"
+#import "PDVisionVR.h"

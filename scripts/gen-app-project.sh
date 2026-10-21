@@ -41,8 +41,21 @@ else
   PUBLIC_DEF=""
 fi
 
+# PD_MULTICAST=1 asks for com.apple.developer.networking.multicast (D-106):
+# the LAN page's room finder broadcasts, and iOS refuses a broadcast to an app
+# without it. Apple grants it per team on request; until the App ID's profile
+# carries it a build that asks will not sign, so it is OFF by default and the
+# LAN page simply finds no rooms (Direct Connect and Online Lobbies do not
+# need it). docs/build.md §"Multicast entitlement".
+if [ "${PD_MULTICAST:-0}" = "1" ]; then
+  ENTITLEMENTS="ios\/perfectdark-multicast.entitlements"
+  echo "PD_MULTICAST=1: signing with the multicast entitlement (ios/perfectdark-multicast.entitlements)"
+else
+  ENTITLEMENTS=""
+fi
+
 sed -e "s/PD_MARKETING_VERSION/$MARKETING/" -e "s/PD_BUILD_NUMBER/$BUILDNUM/" \
-    -e "s/PD_PUBLIC_FLAG/$PUBLIC_DEF/" \
+    -e "s/PD_PUBLIC_FLAG/$PUBLIC_DEF/" -e "s/PD_ENTITLEMENTS/$ENTITLEMENTS/" \
   app/project.yml > app/project.generated.yml
 
 ( cd app && xcodegen generate --spec project.generated.yml --project . >/dev/null )

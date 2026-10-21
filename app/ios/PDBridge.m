@@ -47,6 +47,7 @@
 #endif
 #if TARGET_OS_VISION
 #import "PDVision3D.h"       // round V: `3d on|off|state`
+#import "PDVisionVR.h"       // VR R0: the `vr` dump family (charter D10)
 #endif
 
 // The engine's own, declared here rather than by dragging the decomp's headers
@@ -245,10 +246,12 @@ static NSString *pdErr(NSString *fmt, ...)
 		        " heartbeat | hang <ms> | dump | graft <on|off> | hide60 <on|off> |"
 		        " stall <ms>|every <s> <ms>|off | geo [repair on|off|now] | presented | picker cancel|dismiss|pick <path> |"
 		        " audio trace on|off|dump [name] | audio interrupt begin|end |"
-		        " give <weaponnum> [noammo] | ammo <weaponnum> | pacing engine <hz|auto>"
+		        " give <weaponnum> [noammo] | ammo <weaponnum> | pacing engine <hz|auto> | kbd [type <text>|back|return]"
 #if TARGET_OS_VISION
 	        " | 3d <on|off|park|unpark|crown|showeye|state|recenter|depth <pct>|gunconv <units>"
 	        "|settings <open|close|get|set <row> <value>|press <row>|reset>>"
+	        " | vr [pose|mode|contract|pace|on|off|space VR|A|B|style mixed|full|world on|off"
+	        "|inject X Y Z YAW PITCH|inject off|set scale|height|near|far V|eyedump]"
 #endif
 	        ;
 	}
@@ -1062,6 +1065,80 @@ static NSString *pdErr(NSString *fmt, ...)
 		return out;
 	}
 
+	// `kbd` / `kbd type <text>` / `kbd back` / `kbd return` — the iOS software
+	// keyboard's own path into the game (Online round 2, D-105). SDL raises the
+	// keyboard over a hidden UITextField when the game calls SDL_StartTextInput
+	// (the online pages' name, address, password and chat boxes) and turns that
+	// field's edits into SDL_TEXTINPUT / Backspace / Return. `type` inserts into
+	// that first responder through UIKeyInput, which is what a key on the
+	// keyboard does, so the text reaches the game by the same route a finger's
+	// does; `simctl` cannot type into a simulator app and a hardware keyboard
+	// is a different path (SDL key events). Bare `kbd` reports whether a field
+	// is first responder (= the keyboard is up) and what it holds.
+	if ([cmd isEqualToString:@"kbd"]) {
+		NSString *what = argv.count > 1 ? argv[1].lowercaseString : @"";
+		NSString *text = @"";
+		if ([what isEqualToString:@"type"]) {
+			NSRange r = [cmdline rangeOfString:@"type"];
+			text = r.location != NSNotFound ? [cmdline substringFromIndex:NSMaxRange(r)] : @"";
+			if ([text hasPrefix:@" "]) {
+				text = [text substringFromIndex:1];
+			}
+		}
+		__block NSString *out = nil;
+		dispatch_semaphore_t done = dispatch_semaphore_create(0);
+		dispatch_async(dispatch_get_main_queue(), ^{
+			__block UITextField *field = nil;
+			__block void (^walk)(UIView *) = nil;
+			void (^walker)(UIView *) = ^(UIView *v) {
+				if (field) {
+					return;
+				}
+				if ([v isKindOfClass:UITextField.class] && v.isFirstResponder) {
+					field = (UITextField *)v;
+					return;
+				}
+				for (UIView *sub in v.subviews) {
+					walk(sub);
+				}
+			};
+			walk = walker;
+			for (UIScene *sc in UIApplication.sharedApplication.connectedScenes) {
+				if ([sc isKindOfClass:UIWindowScene.class]) {
+					for (UIWindow *w in ((UIWindowScene *)sc).windows) {
+						walk(w);
+					}
+				}
+			}
+			walk = nil;
+			if (field && [what isEqualToString:@"type"]) {
+				// One character per insert, as keys arrive: SDL turns each edit
+				// into text by diffing the field against its last commit, and a
+				// whole string inserted at once into a field that still held
+				// earlier text came through cut short ("reb" for a 15-letter name).
+				[text enumerateSubstringsInRange:NSMakeRange(0, text.length)
+				                         options:NSStringEnumerationByComposedCharacterSequences
+				                      usingBlock:^(NSString *ch, NSRange r1, NSRange r2, BOOL *stop) {
+					[field insertText:ch];
+				}];
+			} else if (field && [what isEqualToString:@"back"]) {
+				[field deleteBackward];
+			} else if (field && [what isEqualToString:@"return"]) {
+				if ([field.delegate respondsToSelector:@selector(textFieldShouldReturn:)]) {
+					[field.delegate textFieldShouldReturn:field];
+				}
+			}
+			out = [NSString stringWithFormat:@"kbd_up=%d kbd_field=%@ kbd_text_len=%lu",
+				field != nil, field ? NSStringFromClass(field.class) : @"-",
+				(unsigned long)field.text.length];
+			dispatch_semaphore_signal(done);
+		});
+		if (dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)))) {
+			return pdErr(@"UIKit did not respond (is the game loop running?)");
+		}
+		return out;
+	}
+
 	// `presented` — every window of every scene and the controllers presented
 	// in it, with the orientations each one supports. `picker cancel` /
 	// `picker pick <path>` finish the REAL document picker the way a finger
@@ -1501,6 +1578,16 @@ static NSString *pdErr(NSString *fmt, ...)
 	}
 
 #if TARGET_OS_VISION
+	// VR R0 (docs/VR-CHARTER.md D10): the VR mode's dump family. One flat
+	// key=value line per reply, the last field a monotone seq; `vr on|off`
+	// enter and leave through the 3D mode's own sequencing (PDVRImmersive.m).
+	// Runs on this socket thread: every row it reads is a word-sized instrument.
+	if ([cmd isEqualToString:@"vr"]) {
+		NSArray<NSString *> *rest = (argv.count > 1)
+			? [argv subarrayWithRange:NSMakeRange(1, argv.count - 1)] : @[];
+		return pdVisionVRCommand(rest);
+	}
+
 	// The 3D mode (Phase 6). `on`/`off` is what the ornament's button does — the
 	// ornament needs a gaze-pinch and simctl cannot inject one, so this is the
 	// only way a scripted gate can enter 3D. Hops to the main thread because

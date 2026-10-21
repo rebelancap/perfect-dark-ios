@@ -48,6 +48,7 @@
 // compositor queues command buffers without bound and the footprint climbs
 // until the OS intervenes.
 #import "PDVision3D.h"
+#import "PDVisionVR.h"   // VR R0: the eye's aspect and the pose latch
 
 #if TARGET_OS_VISION
 
@@ -284,6 +285,24 @@ static void pdEyeBaseSize(int *w, int *h)
 		ch = PD_EYE_FALLBACK_H;
 	}
 
+	// VR R0: the eye is the compositor's whole view, at the frustum's own
+	// aspect, so a whole-slice blit is undistorted. Same area budget and caps.
+	const float vrAspect = pdVisionVREyeAspect();
+	if (vrAspect > 0.1f) {
+		float fw = (float)cw, fh = fw / vrAspect;
+		const float area = fw * fh;
+		if (area > (float)PD_EYE_BUDGET_PX) {
+			const float k = sqrtf((float)PD_EYE_BUDGET_PX / area);
+			fw *= k;
+			fh *= k;
+		}
+		if (fw > (float)PD_EYE_MAX_DIM) { fw = (float)PD_EYE_MAX_DIM; fh = fw / vrAspect; }
+		if (fh > (float)PD_EYE_MAX_DIM) { fh = (float)PD_EYE_MAX_DIM; fw = fh * vrAspect; }
+		*w = (int)lroundf(fmaxf(64.0f, fw));
+		*h = (int)lroundf(fmaxf(64.0f, fh));
+		return;
+	}
+
 	const float halfW = fmaxf(0.05f, s_cmtHalfW);
 	const float halfH = fmaxf(0.05f, s_cmtHalfH);
 	const float dist  = fmaxf(0.1f,  s_cmtDist);
@@ -325,6 +344,9 @@ static const char *pdEyeBaseSource(void)
 {
 	if (pdEyePinned(NULL, NULL)) {
 		return "env";
+	}
+	if (pdVisionVREyeAspect() > 0.1f) {
+		return "vr";
 	}
 	if (atomic_load(&s_compFovMilliRad) > 0) {
 		return "panel";
@@ -925,6 +947,8 @@ void pdVisionEyeBeginPair(void)
 		return;
 	}
 	s_eye = PD_EYE_LEFT;
+	// VR R0: one head pose for both eye walks of this frame.
+	pdVisionVRLatch();
 	// The gun's convergence plane is frozen HERE, for both eye walks (D-060).
 	pdVisionStereoFreezeGunNear();
 	if (atomic_load(&s_inFlight) <= 2) {
@@ -972,7 +996,12 @@ int pdVisionStereoFold(float *outOffset, float *outConvergence, float *outGunCon
 				e, (double)s_depthPct);
 		}
 	}
-	const float e = PD_STEREO_HALFSEP * (s_depthPct / 100.0f);
+	float e = PD_STEREO_HALFSEP * (s_depthPct / 100.0f);
+	// VR R0: the eye law replaces the fold (overlay 0057), so every per-eye
+	// effect still keyed on the fold's offset (the glare shift, D-060) is mono.
+	if (pdVisionVRActive()) {
+		e = 0.0f;
+	}
 	if (!(e > 1e-6f) && !(e < -1e-6f)) {
 		// Stereo Depth 0 %: both eyes are the mono projection, and the L/R
 		// captures must come out pixel-identical. That is an acceptance item,
@@ -1109,6 +1138,14 @@ void pdVisionEyeResizeIfPending(void)
 		NSLog(@"perfectdark: [3d] eye resize FAILED to re-wrap at %dx%d —"
 		       " the panel will hold its fallback colour", w, h);
 	}
+}
+
+void pdVisionEyeVRResize(void)
+{
+	if (pdEyePinned(NULL, NULL)) {
+		return;
+	}
+	atomic_store(&s_resizeAsked, 1);
 }
 
 void pdVisionStereoSetGunConvergence(float units)

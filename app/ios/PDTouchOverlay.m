@@ -236,6 +236,12 @@ static const PDButtonSpec kButtons[] = {
 	// menu, the drag picks the slice, the lift chooses it. Glyph = vkQuake's
 	// wheel (ios_touch.m), the user's ask.
 	{ "WHEEL",  PD_CK_RADIAL,     "circle.hexagongrid.fill",     0.8918, 0.3720, 28 },
+	// CHAT (Online round 2, D-105): no pad bit - a tap opens the online match's
+	// chat line (overlay 0060), which brings up the software keyboard; Return
+	// sends. Shown ONLY while an online match is live (-applyChipRules), under
+	// START and clear of the radar and WHEEL. A phone has no T key and a pad
+	// has no chat at all, so without it a touch player could not talk in a match.
+	{ "CHAT",   0,                "bubble.left.fill",            0.9400, 0.2400, 20 },
 };
 #define PD_NUM_BUTTONS ((int)(sizeof(kButtons) / sizeof(kButtons[0])))
 
@@ -436,6 +442,7 @@ static const PDButtonSpec kMenuButtons[] = {
 	CGVector _wheelStick;     // -1..1, screen axes, after the radial deadzone
 	BOOL _wheelArmed;
 	__weak PDTouchButtonView *_altChip;
+	__weak PDTouchButtonView *_chatChip;   // D-105: online matches only
 	__weak PDTouchButtonView *_wheelChip;
 
 	CGPoint _stickOrigin;
@@ -1044,6 +1051,18 @@ static const CGFloat kWheelRadius = 32.0;
  */
 - (void)applyChipRules
 {
+	// D-105: the CHAT chip exists only while an online match is live (overlay
+	// 0060), and never over a menu. The editor shows every chip (it is a
+	// layout, not a game state), so it is left alone while editing.
+	PDTouchButtonView *chat = _chatChip;
+	if (chat && !_editing) {
+		const BOOL hideChat = _menuOpen || !netHudIosChatAvailable() || [self userHid:chat];
+		if (chat.hidden != hideChat) {
+			chat.hidden = hideChat;
+			NSLog(@"perfectdark: [touch] CHAT chip %@", hideChat ? @"hidden" : @"shown");
+		}
+	}
+
 	PDTouchButtonView *alt = _altChip;
 	if (!alt || _editing) {
 		return;
@@ -1558,6 +1577,7 @@ static const CGFloat kWheelRadius = 32.0;
 		[_buttons addObject:b];
 		if ([b.label isEqualToString:@"ALT"]) { _altChip = b; }
 		if ([b.label isEqualToString:@"WHEEL"]) { _wheelChip = b; }
+		if ([b.label isEqualToString:@"CHAT"]) { _chatChip = b; b.hidden = YES; }
 	}
 	// Fainter: placeable and pressable, but temporary (bean).
 	_leftFire = [[PDTouchButtonView alloc] initWithSpec:&kLeftFire
@@ -2123,6 +2143,18 @@ static const CGFloat kWheelRadius = 32.0;
 - (void)beginTouchAt:(CGPoint)p touch:(nullable UITouch *)touch
 {
 	PDTouchButtonView *b = [self buttonAtPoint:p];
+	if (b && b == _chatChip) {
+		// No pad bit: the press opens the chat line at the next frame boundary
+		// (D-105). The keyboard that comes up is SDL's; its Return sends.
+		[PDShell.shared enqueue:^{
+			const int ok = netHudIosChatOpen();
+			NSLog(@"perfectdark: [touch] CHAT chip pressed: line %@", ok ? @"open" : @"not available");
+		}];
+#if !TARGET_OS_VISION
+		[_haptics impactOccurred];
+#endif
+		return;
+	}
 	if (b) {
 		b.held = YES;
 		_buttonMask |= b.mask;

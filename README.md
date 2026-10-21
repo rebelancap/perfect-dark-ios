@@ -139,6 +139,28 @@ the patch is applied to; a Goldfinger 64 ROM you have already patched works
 too, in any byte order. The next launch converts it once (a few seconds). It
 always draws in the N64 look. Settings has an add/replace row for it.
 
+**Tomorrow Never Dies 64** works the same way: put `tnd64.zip` in
+`added-content` and its 14 missions and 11 arenas are converted at the next
+launch, with their own row in the Perfect Menu.
+
+**Online Game** (Dab's Mod netplay) is on the main menu, and plays with
+desktop players of the same Dab's Mod release (the iPhone and Vision Pro builds
+carry its build id):
+
+- **Direct Connect**: Connect to Address and type the host's address on the
+  iPhone keyboard, `192.168.1.5` or `192.168.1.5:27105` (port 27100 unless the
+  host changed it); a room with a password asks for it. Create Room hosts one on
+  your phone; friends on the same Wi-Fi join at the address the Game Lobby shows.
+- **Online Lobbies**: rooms on Dab's lobby server. An account is a name and a
+  PIN; a new name makes one (three security questions, picked from lists).
+- **LAN**: finds rooms on your network by broadcast, which iOS only allows an app
+  Apple has granted the multicast entitlement. Until this app has it, LAN rooms
+  do not show; use Direct Connect with the host's address.
+
+iOS asks once for Local Network access. In a match the chat bubble (top right)
+opens the chat line with the keyboard; the pause menu has the players list and
+End Game.
+
 ### Everything else, in the same folder
 
 | Path | What it is |

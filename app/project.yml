@@ -88,6 +88,10 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.rebelancap.perfectdark
         PRODUCT_NAME: perfectdark
         INFOPLIST_FILE: ios/Info.plist
+        # PD_MULTICAST=1 (scripts/gen-app-project.sh, D-106) puts
+        # ios/perfectdark-multicast.entitlements here; empty otherwise, so
+        # builds keep signing until Apple grants the entitlement.
+        CODE_SIGN_ENTITLEMENTS: "PD_ENTITLEMENTS"
         MARKETING_VERSION: "PD_MARKETING_VERSION"
         CURRENT_PROJECT_VERSION: "PD_BUILD_NUMBER"
         # build/ios-device vs build/ios-simulator, chosen by the SDK in use.
@@ -173,6 +177,9 @@ targets:
       - path: vision3d/PDVisionApp.swift
       - path: vision3d/PDHostViewController.m
       - path: vision3d/PDImmersive.m
+      # VR R0 (docs/VR-CHARTER.md): the VR mode's own compositor loop, eye law
+      # and `vr` dump family, run by the PDVR sibling spaces.
+      - path: vision3d/PDVRImmersive.m
       # M2: the eye render targets. .mm because it needs Metal and ANGLE's own
       # EGL/GLES headers in one translation unit (work/angle-include, on the
       # header path below).
@@ -187,6 +194,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.rebelancap.perfectdark
         PRODUCT_NAME: perfectdark
         INFOPLIST_FILE: ios/Info-visionos.plist
+        CODE_SIGN_ENTITLEMENTS: "PD_ENTITLEMENTS"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         MARKETING_VERSION: "PD_MARKETING_VERSION"
         CURRENT_PROJECT_VERSION: "PD_BUILD_NUMBER"

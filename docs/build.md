@@ -2268,3 +2268,130 @@ the git 3-way rebase (§Traps c18645860) merged 7 of them and four needed hands 
   505,243, the Game Pak row at 420,194, the first agent file at 345,225.
 - **`pgrep -f perfectdark.app/perfectdark` can match the wrong process** for footprint
   polling; match `Containers/Bundle/Application/.*/perfectdark.app/perfectdark`.
+
+## Traps earned (VR R0: the spike, the harness, and a shared headset)
+
+- **The one Vision Pro is often someone else's.** At the start of R0's device work it
+  was booted by SpaghettiKart's session and stayed busy ~3.5 h (its app relaunching
+  every few minutes). It was waited for — `xcrun simctl list devices booted` plus
+  `simctl spawn <udid> launchctl list | grep UIKitApplication` says whose app is in the
+  foreground. Do everything that needs no device (oracle, iOS build, scripts, docs)
+  while waiting; never boot-steal, never create a second device.
+- **`find "$OUT" -type f -delete` recurses.** The verify script's "clear the old
+  artifacts" step also emptied `artifacts/sim/vr-r0/oracle-2d/` from an earlier step of
+  the round. `-maxdepth 1` now; keep sub-results in a subdir only if the cleaner knows.
+- **A watchdog `( sleep 600; kill $pid ) &` keeps the caller's stdout open.** Killing
+  the subshell does not kill its `sleep`, so a pipeline waits the full 600 s after a
+  20 s replay. Kill the sleep's pid, or skip the watchdog for a replay that exits on
+  `--exit-frame`.
+- **The simulator's drawable cannot tell `.dedicated` from `.layered`.** One view, one
+  texture, slice 0 is both. `vr contract` reports what `PDCompositorConfiguration`
+  ASKED for (`pdVision3dLayoutDedicated`, layered on the sim) — an inference from
+  textures/views called it "dedicated" and was wrong.
+- **`vr on` straight after `vr off` can be silently ignored.** PDVisionApp's
+  `spaceBusy` guard drops an `openImmersiveSpace` that arrives while the previous
+  dismiss Task is still awaiting, leaving the shell "on" with no space. The verify
+  script waits for `mode=flat imm_running=0` AND a further 6 s before the next entry.
+- **PD's 2D rectangles never meet MP**, so in VR the HUD is head-locked and 0055's /
+  D-064's depth tags do nothing (the fold's `e` is 0 while the eye law is live).
+  Expected, but read the room capture before assuming the HUD plane is "just a matrix".
+- **Comparing the shell's EyeVP to the engine's bit for bit needs the same arithmetic:**
+  same summation order as `gfx_matrix_mul` and `#pragma clang fp contract(off)` in the
+  shell (the engine is `-ffp-contract=off`; ObjC defaults to contracting).
+
+## Traps earned (the upstream pin bump, 90c8622e7 -> a8c2ab2d7, 1.0.4)
+
+702 upstream commits (release v3.15.1). 16 patches failed `patch`; the git 3-way rebase
+merged 10 and six needed hands (D-103).
+
+- **Upstream's netplay checks `VERSION_HASH`, and ours was the port's.** build/src has no
+  `.git`, so CMake's `git rev-parse --short HEAD` walks up into this repository. Nothing
+  cared until netplay: CONNECT, LAN adverts and the lobby's room filter all carry it, and
+  a host refuses any other build. Overlay 0058 + `build-ios.sh -DPD_VERSION_HASH=<pin>`.
+  Check with `grep VERSION_HASH build/ios-*/port/include/versioninfo.h`. It also feeds the
+  GoldenEye stage cache key, which used to change on every port commit.
+- **The macOS oracle is a netplay host for free**: `scripts/run-oracle.sh --clang --ini
+  <seed> -- --skip-intro --no-sound --log --host 27100`, and the sim joins with
+  `simctl launch ... --connect 127.0.0.1:27100` (the sim's loopback is the Mac's).
+  Direct Connect's menu path does NOT find a bare `--host`: it asks for a ROOM ("No room
+  answered"), which only Create Room makes. Use the CLI pair.
+- **Upstream's audio now reopens the device** for 5.1 (`audioOpenDevice`), and its new
+  Mute When Unfocused fades in `audioEndFrame`. Our iOS queue code is stereo-only, so
+  0023 pins the device at two channels. `--audio-dump` on iOS is written BEFORE the
+  shell gain, so a test with the shell muted (`defaults write com.rebelancap.perfectdark
+  pd.audio.mute -bool YES` - do this on both simulators, the gates do not mute) still
+  records the game.
+- **The iOS gate could screenshot at `frames=0`.** `engine=running` comes before the
+  first frame; v3.15.1's boot reached the content check on a near-black fade-in. The gate
+  now waits for 120 frames.
+- **0001 is half-absorbed.** Upstream scans INSIDE an unpacked archive six deep now; our
+  depth 4 still matters for a tree unpacked by hand into `added-content/`. An oracle with
+  the `.rar` in `added-content/` needs no hand-flattened cache any more.
+- **Online pages by touch**: the menu pointer drives them like any menu; B (`touch off`,
+  `pad b down/up`, `touch on`) backs out. Rows at 844x390 points: Online Game page
+  Online Lobbies 421,126 / LAN 421,183 / Direct Connect 421,240 / Back 421,294; Name
+  Entry Next 421,224, Back 421,256; the on-screen keyboard's OK 425,251 (name) and 445,257
+  (address). The Perfect Menu needs a `stream 420 300 0 -12 12 30` scroll before Online
+  Game (394,245) is on screen.
+- **A 3D room shot during Chicago's opening camera looks broken** (a wall filling half
+  the panel, tilted geometry): it is the cutscene camera sweeping past the wall. Wait for
+  `stereo_frame_gun > 0` (first person) before judging, as `vision3d-stereo-verify.sh`
+  does.
+
+## Traps earned (Online on iOS, 1.0.4)
+
+Online round 2 (D-105, D-106, M-056). Played on lane 3 against the macOS clang oracle.
+
+- **A scripted desktop peer is upstream's lobby script**, not `--host`/`--connect`:
+  `scripts/run-oracle.sh --clang --savedir <own> --ini <Port=27300> -- --skip-intro
+  --no-sound --log --net-lobby-script host --net-lobby-mode direct --net-lobby-room NAME
+  --net-test-sims N` makes a Direct Connect room the phone's Connect to Address finds;
+  `--net-lobby-script join --net-lobby-address 127.0.0.1:27100 --net-lobby-room NAME
+  --net-lobby-leave-frame 0` joins one the phone hosts. Give the oracle its own Net.Port:
+  sim and oracle share the Mac's ports. `--net-lobby-coop 0` for a co-op room,
+  `--net-test-input FILE` + `--net-test-aimat nearest` for a client that moves and fires,
+  `--net-test-give TICK,WEAPON` (+ `--net-test-give-host`) on a host arms everyone. The
+  same flags pass through `simctl launch` to the phone (the Vision Pro joined that way).
+- **The oracle's own screenshot on demand: lldb.** `lldb -p <pid> --batch -o 'expr
+  (void)screenshotRequest()' -o detach` - `screencapture` returns black (no screen
+  recording permission) and `--screenshot-frame` takes one. Each attach stalls the
+  oracle ~1 s (a "60 ticks behind" line). lldb also set `g_MpSetup.scorelimit = 100`
+  and called `netLobbyLaunch(0)` when the script would not relaunch after a Leave.
+- **A client is player 1.** Anything the shell reads for "the player" or "the menu" must
+  ask `g_NetLocalSlot`, not 0 / `currentplayer` (0059). Symptom: the overlay stays in
+  gameplay mode over a client's end screen.
+- **Tap timing.** A bridge `tap` with no hold can be lost online (START did not open the
+  pause menu until `tap ... 150`); a finger's ~100 ms press is fine. In menus a short
+  synthetic tap can only focus a row; use a 120-150 ms hold, or `point` then `tap`.
+  Dialogs resize with their text, so fixed coordinates drift - screenshot first.
+- **`kbd type` and SDL's text diff.** SDL turns the hidden field's edits into text by
+  diffing against its last commit; a whole string inserted at once came through cut
+  ("reb"). The bridge inserts per character now. Return right after the last character
+  can hide the keyboard without PD accepting; PD's grid OK still works.
+- **Paused online is not paused.** Sims kill you in the pause menu; a death closes it.
+  Make the client invincible on the host (`--net-test-invincible-pad 1`, or lldb
+  `g_Vars.players[1]->invincible = 1`) before menu work in a match.
+- **LAN on the simulator is the Mac's LAN**: broadcast works there with no entitlement.
+  The finder asks Net.Port and the three after it (and 27100-27103): a host on 27300 is
+  not found from a phone on 27100.
+- **visionOS does not background** a window when another app opens (the shared space);
+  `sceneWillResignActive` did not fire. The background test is an iPhone test.
+- **Ghost/lobby account name of 15 characters** came back 14 after a restart (0063).
+
+## Multicast entitlement (`PD_MULTICAST=1`, D-106)
+
+LAN room finding needs `com.apple.developer.networking.multicast` on a device. It is
+OFF by default so every build keeps signing. Once Apple has granted it to your
+team and the App ID's profile carries it:
+
+```sh
+PD_MULTICAST=1 scripts/gen-app-project.sh          # project with the entitlement
+PD_MULTICAST=1 scripts/publish-ota.sh "..."        # hub build; asserts it is signed in
+PD_MULTICAST=1 PD_VISIONOS=1 scripts/publish-ota.sh "..."
+```
+
+`app/ios/perfectdark-multicast.entitlements` is the file; `project.yml`'s
+`CODE_SIGN_ENTITLEMENTS: "PD_ENTITLEMENTS"` is filled by `gen-app-project.sh` (empty
+without the switch). A profile without the entitlement fails the archive in words.
+SideStore (sideloaded) builds will never have it: their LAN page stays empty and
+Direct Connect is the way. Check a build: `codesign -d --entitlements :- <app>`.

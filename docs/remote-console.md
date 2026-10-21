@@ -104,6 +104,7 @@ entirely the wrong reason. If it truly cannot bind it says
 | `geo device <1\|3\|4>` | sets `UIDevice.orientation` by KVC. Kept as a recorded dead end: under UIScene it does NOT rotate anything |
 | `presented` | every window of every scene, the controllers presented in each and the orientations each supports |
 | `picker cancel` / `picker pick <path>` / `picker dismiss` | finish the REAL document picker (opened with `settings row …`) the way a finger does: it goes away, then its delegate hears cancelled or picked-with-that-file. `dismiss` closes whatever is on top (an alert, as if OK) |
+| `kbd` / `kbd type <text>` / `kbd back` / `kbd return` | the iOS software keyboard's own path (D-105). SDL raises the keyboard over a hidden UITextField when the game starts text input (the online pages' name, address, PIN, password and chat boxes); `type` inserts into that first responder one character at a time through UIKeyInput, which is what a key does, `back` is its delete key and `return` its Return. Bare `kbd` answers `kbd_up=0|1` (is a field first responder = is the keyboard up). `simctl` cannot type into a simulator app |
 | `quit` | `configSave()` then `exit(0)` — which is also the only way to end a scripted run with its settings written (`atexit(cleanup)`, `main.c:124`) |
 
 ### Why `tap` exists at all
@@ -459,3 +460,80 @@ stereo_cls_gun=2060     ... as gun (znear 1.5: C_gun = znear)
 - **`PD_VP3D_AUTOENTER=1` is the scripted way in.** The window's "3D" ornament
   needs a gaze-pinch and no simulator tool can inject one, so the env flag
   enters 3D at frame 300 instead. Absent, it does nothing.
+
+## `vr` — the visionOS VR mode's diagnostics (VR round R0, visionOS builds only)
+
+The charter's D10 dump family (docs/VR-CHARTER.md, docs/VR-R0-FINDINGS.md),
+compiled out of public builds with the rest of the bridge. **Every reply is one
+flat `key=value` line whose LAST field is a monotone `seq`**, so a script can
+diff two dumps with `sed -E 's/ seq=[0-9]+$//'` and nothing else. Errors are
+`vr=error msg="..." seq=N`. Bare `vr` prints mode, pose, contract and pace, one
+line each.
+
+```
+vr on              enter VR: opens the space `vr space` chose ("PDVR" by
+                   default) through the 3D mode's own entry sequencing (engine
+                   offscreen, curtain "Playing in VR", park). Refused while the
+                   3D PANEL mode is on — 3D<->VR is dismiss-then-open (charter
+                   D1): `3d off` first. "requested", not "on": poll `vr mode`
+vr off             leave VR: the 3D exit path (stop + wait, un-park, dismiss,
+                   window re-bound). The exit clears the VR request, so the
+                   next `3d on` opens PD-3D again
+vr space VR|A|B    which space the next `vr on` opens: PDVR (the {.mixed,
+                   .full} candidate), PDVRTestA (constant .mixed) or PDVRTestB
+                   (constant .full). A and B exist only for R0a's contract A/B
+vr style mixed|full
+                   PDVR's live immersion style (the surroundings choice,
+                   charter D3/Q-VR5). Switched while the space is open
+vr world on|off    on (default): blit the engine's two eyes across each view's
+                   whole slice. off: clear each view to a half-transparent
+                   colour (L red, R blue) and present - the pure space/present
+                   test, no engine involved
+vr pose            the eye law: head (relative to the anchor), both eye
+                   positions, the IPD check in EYE space (ipd_eye_dx/dy/dz,
+                   ipd_check=PASS|FAIL), scale/height/near/far, the world depth
+                   row, P_eye's x scale, the clip-x check (clipx_delta vs
+                   0.063 m x scale x pe00, clipx_check), the published EyeVP
+                   rows (eyeL/eyeR_row0/row3), what the ENGINE substituted for
+                   a plain WORLD load (engL/engR_row3) and whether it is the
+                   published matrix bit for bit (subst_exact=1,1)
+vr mode            mode=flat|panel3D|vr, wanted, space, style, loop_running,
+                   imm_running, loop_stop, reason (idle | starting | clear_only
+                   | world | no_eye_texture | stopped | invalidated), world,
+                   engine_law (pdVisionVRActive: 1 only while the eye law is
+                   substituting), eye_renders, eye_size, eye_aspect, in_flight,
+                   anchored, injected, contract, frames, no_drawable, stage,
+                   menu_open
+vr contract        the drawable contract: views, textures, rate maps, layout,
+                   formats, per-eye viewport / texture / slice / tangents
+                   (L,R,B,T), and the DEPTH CONTRACT: the compositor's own
+                   matrix classified (forwardZ | reverseZ_finite |
+                   reverseZ_infinite_far) from c2z/c3z AND measured by pushing
+                   points at 1, 10 and 1000 m through it (eyeN_zndc_*), the
+                   SDK's depth range, the engine's convention and the constant
+                   depth R0's blit writes
+vr pace            rolling 1 s windows sampled every 100 ms in EVERY mode:
+                   engine_fps (shell frames), tick_tps (g_Vars.lvframenum),
+                   sim60_rate (g_Vars.lvframe60: 60 when the game runs at full
+                   speed), present_hz (compositor frames, either loop),
+                   comp_hz (the loop's own cadence), comp_gpu_ms (the VR loop's
+                   command buffer, EMA)
+vr inject X Y Z YAW PITCH
+                   a synthetic head pose relative to the anchor (metres,
+                   degrees; +Z is BEHIND the game camera). Wins over the frozen
+                   pose while armed. Sleeps one compositor frame and answers
+                   with `vr pose`
+vr inject off      back to the frozen identity head
+vr set scale|height|near|far V
+                   the A-and-P tunables: scale = PD units per metre (85),
+                   height = metres added to the eye, near/far = the world's
+                   depth range in PD units (0 = the game's own, which is the
+                   default and what keeps the depth test the game's)
+vr eyedump         the per-eye ENGINE readback: size, FNV-1a hash, mean RGB,
+                   alpha mean/min (finding 8), differ=1 when the two eyes are
+                   different pictures; PNGs at Documents/vr-eye0.png and
+                   vr-eye1.png (512 wide, the right way up)
+```
+
+`scripts/vr-r0-verify.sh` drives every row of this headless and writes
+`artifacts/sim/vr-r0/`.

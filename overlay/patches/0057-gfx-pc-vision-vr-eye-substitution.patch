@@ -1,0 +1,194 @@
+Subject: gfx_pc: the VR mode's eye matrix, substituted at 0030's two MP sites (VR R0)
+
+VR round R0 (docs/VR-CHARTER.md §5, §4 D2; docs/VR-R0-FINDINGS.md; D-100).
+Stacked on 0030's inserted gfx_stereo_projection() text, which works in this
+repo exactly as 0033/0034/0055 already do (D-101: the charter's "0030
+regenerations through its generator" is a Shipwright inheritance; there is no
+generator here and no reverse probe).
+
+While pdVisionVRActive() is 1 - the VR compositor loop is running in world
+mode with a published eye law - gfx_stereo_projection() hands the projection
+to gfx_vr_projection() instead of folding an offset into it:
+
+  * FLAT (menuRender's span, 0032) keeps the game's own matrix, exactly as the
+    3D path does;
+  * every other projection is decomposed exactly as View * Pg (Pg a plain
+    guPerspectiveF, View the identity for props, the baked camera for the bg,
+    the camera's rotation for the sky) and rebuilt as View * E' * P_eye, where
+    E is the shell's head-to-eye transform (A.V, PD units, row-vector), E' is
+    E with its translation scaled by bg_scale for a baked matrix and dropped for
+    the SKY, and P_eye is the compositor's asymmetric frustum with the class's
+    OWN depth row (so the world, the sky and the gun keep their ranges);
+  * a plain WORLD load is E * P_eye exactly, which is what the shell publishes
+    as EyeVP, and the engine reports what it substituted (`vr pose`);
+  * 0034's near law stays disarmed (near_k is cleared before the gate).
+
+When the gate is 0 - 2D, the 3D panel mode, and every non-visionOS build -
+nothing after it has changed: the 3D fold is byte-for-byte the same path, and
+off visionOS none of this compiles (PD_VISION_STEREO is 0). The 2D seeded
+replay against the macOS oracle is the proof.
+
+diff --git a/port/fast3d/gfx_pc.cpp b/port/fast3d/gfx_pc.cpp
+index 71d3b303a..332f70bd8 100644
+--- a/port/fast3d/gfx_pc.cpp
++++ b/port/fast3d/gfx_pc.cpp
+@@ -94,6 +94,15 @@ extern "C" void pdVisionStereoNoteGunVertex(float depth);
+ // D-061: the near law. Two pure multiples of the fold's own far asymptote, plus
+ // the soft knee's width — the whole of the clamp's parameters.
+ extern "C" void pdVisionStereoNearLaw(float *outWorldN, float *outGunN, float *outKnee);
++// VR R0 (D-099..D-102, docs/VR-R0-FINDINGS.md): the VR mode's eye law. While
++// pdVisionVRActive() is 1 the shell has published, per eye, the head-to-eye
++// transform E (game view space -> eye space, PD units, ROW-vector) and the
++// compositor's asymmetric frustum tangents; gfx_vr_projection() below turns
++// them into the eye's matrix. 0 everywhere else, so the 3D fold is untouched.
++extern "C" int pdVisionVRActive(void);
++extern "C" unsigned int pdVisionVREye(int eye, float E[4][4], float tan[4], float depth[2]);
++extern "C" void pdVisionVRNoteWorldDepth(float p22, float p32);
++extern "C" void pdVisionVRNoteEyeMP(int eye, int cls, const float m[4][4]);
+ #else
+ #define PD_VISION_STEREO 0
+ #endif
+@@ -2553,6 +2562,130 @@ static bool gfx_stereo_p_is_plain(const float P[4][4]) {
+            P[2][3] == -1.0f && P[3][0] == 0.0f && P[3][1] == 0.0f && P[3][3] == 0.0f;
+ }
+ 
++/*
++ * VR R0 (D-100): THE EYE'S OWN MATRIX, SUBSTITUTED FOR THE GAME'S.
++ *
++ * The 3D panel mode FOLDS an offset into the game's projection; VR REPLACES the
++ * projection with the eye's: the head-to-eye transform E the shell composed
++ * (charter D2's A.V, in PD units, row-vector) followed by the compositor's own
++ * asymmetric frustum (P_eye, from the tangents cp_drawable_compute_projection
++ * gives, recovered exactly). Same two MP sites, same class tags (0032): FLAT
++ * keeps the game's matrix exactly as the 3D path does.
++ *
++ * Every perspective this engine loads is `View * Pg` with Pg a plain
++ * guPerspectiveF and View rigid: View is the identity for the props (their
++ * modelview carries the camera), the camera baked in for the bg (player.c's
++ * orthomtxl), and the camera's ROTATION for the sky (vi0000ab78). The product
++ * is decomposed exactly - Pg's w column is (0,0,-1,0), so M's last column IS
++ * -View's z axis - and rebuilt as
++ *
++ *     M_eye = View * E' * P_eye        P_eye depth = the class's own (Pg's)
++ *
++ * so the world, the sky and the gun each keep the depth range the game gave
++ * them, and in a plain WORLD load (View = I exactly) this is E * P_eye, which
++ * is the shell's published EyeVP bit for bit (`vr pose` prints both).
++ *
++ *   E' for SKY   = rotation only: the sky never rides the head's position.
++ *   E' for a baked (bg) matrix = translation x bg_scale (its view unit, D-060).
++ *
++ * R0 is a FROZEN pose: the shell latches E once per eye pair, at
++ * pdVisionEyeBeginPair, so both walks of one frame read one pose.
++ */
++struct PDVRCache {
++    unsigned int gen;
++    int eye;
++    int cls;
++    float s;
++    float in[4][4];
++    float out[4][4];
++};
++static PDVRCache pd_vr_cache = { 0, -1, -1, 0.0f, {{0}}, {{0}} };
++
++static bool gfx_vr_projection(const float P[4][4], float out[4][4]) {
++    memcpy(out, P, 16 * sizeof(float));
++    int cls = pd_stereo.flat_span ? PD_DLCLASS_FLAT : pd_stereo.p_class;
++    pdVisionStereoNoteClass(cls);
++    if (cls == PD_DLCLASS_FLAT) {
++        // The game's own matrix: identical in both eyes (charter D3 moves these
++        // frames to the panel in R1; in R0 they hang head-locked).
++        return true;
++    }
++    const int eye = pdVisionGetEye();
++    float E[4][4], tan[4], depth[2];
++    const unsigned int gen = pdVisionVREye(eye, E, tan, depth);
++    if (gen == 0) {
++        return true;   // nothing published yet: the game's matrix
++    }
++    const bool plain = gfx_stereo_p_is_plain(P);
++    const float s = plain ? 1.0f : pd_stereo.bg_scale;
++    if (pd_vr_cache.gen == gen && pd_vr_cache.eye == eye && pd_vr_cache.cls == cls &&
++        pd_vr_cache.s == s && memcmp(pd_vr_cache.in, P, sizeof(pd_vr_cache.in)) == 0) {
++        memcpy(out, pd_vr_cache.out, sizeof(pd_vr_cache.out));
++        return true;
++    }
++
++    // View's z axis (and translation z), from M's w column: M[r][3] = -View[r][2].
++    const float c3[4] = { -P[0][3], -P[1][3], -P[2][3], -P[3][3] };
++    const float k = sqrtf(c3[0] * c3[0] + c3[1] * c3[1] + c3[2] * c3[2]);
++    const float na = sqrtf(P[0][0] * P[0][0] + P[1][0] * P[1][0] + P[2][0] * P[2][0]);
++    const float nb = sqrtf(P[0][1] * P[0][1] + P[1][1] * P[1][1] + P[2][1] * P[2][1]);
++    if (!(k > 1e-6f) || !(na > 1e-9f) || !(nb > 1e-9f) || !(tan[1] > tan[0]) || !(tan[3] > tan[2])) {
++        // Not a perspective this law can read (w does not depend on z): keep it.
++        return true;
++    }
++    const float a = na / k, b = nb / k;
++    float View[4][4];
++    for (int r = 0; r < 4; r++) {
++        View[r][0] = P[r][0] / a;
++        View[r][1] = P[r][1] / b;
++        View[r][2] = c3[r];
++        View[r][3] = (r == 3) ? 1.0f : 0.0f;
++    }
++    // The class's own depth: M[r][2] = View[r][2]*P22 + View[r][3]*P32.
++    float P22 = (P[0][2] * c3[0] + P[1][2] * c3[1] + P[2][2] * c3[2]) / (k * k);
++    float P32 = P[3][2] - P22 * c3[3];
++    if (cls == PD_DLCLASS_WORLD && depth[0] > 0.0f && depth[1] > depth[0]) {
++        // `vr set near|far`: the world's depth range, rebuilt forward (GL
++        // [-1,1], guPerspectiveF's own form) in game units.
++        P22 = (depth[0] + depth[1]) / (depth[0] - depth[1]);
++        P32 = 2.0f * depth[0] * depth[1] / (depth[0] - depth[1]);
++    }
++    if (plain && cls == PD_DLCLASS_WORLD) {
++        pdVisionVRNoteWorldDepth(P22, P32);
++    }
++
++    float Ep[4][4];
++    memcpy(Ep, E, sizeof(Ep));
++    for (int i = 0; i < 3; i++) {
++        Ep[3][i] = (cls == PD_DLCLASS_SKY) ? 0.0f : E[3][i] * s;
++    }
++
++    const float tL = tan[0], tR = tan[1], tB = tan[2], tT = tan[3];
++    float Pe[4][4] = { { 0 } };
++    Pe[0][0] = 2.0f / (tR - tL);
++    Pe[2][0] = (tR + tL) / (tR - tL);
++    Pe[1][1] = 2.0f / (tT - tB);
++    Pe[2][1] = (tT + tB) / (tT - tB);
++    Pe[2][2] = P22;
++    Pe[2][3] = -1.0f;
++    Pe[3][2] = P32;
++
++    float VE[4][4];
++    gfx_matrix_mul(VE, View, Ep);
++    gfx_matrix_mul(out, VE, Pe);
++
++    if (plain && cls == PD_DLCLASS_WORLD) {
++        pdVisionVRNoteEyeMP(eye, cls, out);
++    }
++    pd_vr_cache.gen = gen;
++    pd_vr_cache.eye = eye;
++    pd_vr_cache.cls = cls;
++    pd_vr_cache.s = s;
++    memcpy(pd_vr_cache.in, P, sizeof(pd_vr_cache.in));
++    memcpy(pd_vr_cache.out, out, sizeof(pd_vr_cache.out));
++    return true;
++}
++
+ /**
+  * The per-eye projection, from the mono one (plan §2.4, D-049's arithmetic).
+  *
+@@ -2643,6 +2776,12 @@ static bool gfx_stereo_projection(const float P[4][4], const float mv[4][4],
+     // being loaded; a class that does not want it leaves it at zero, and so do
+     // all of the early returns below.
+     pd_stereo.near_k = 0.0f;
++    // VR R0 (D-100): while the VR mode's law is live the eye's own matrix
++    // REPLACES the fold below. 0 in 2D and in the 3D panel mode, where nothing
++    // after this line has changed.
++    if (pdVisionVRActive()) {
++        return gfx_vr_projection(P, out);
++    }
+     if (e == 0.0f) {
+         // Stereo Depth 0 %: the mono projection in both eyes, bit for bit. The
+         // gate leans on this - an L/R pair taken at 0 % must be pixel-identical

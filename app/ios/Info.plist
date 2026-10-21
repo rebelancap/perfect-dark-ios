@@ -95,6 +95,14 @@
 	<string>Perfect Dark can connect to Bluetooth game controllers.</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>
 	<string>Perfect Dark can connect to Bluetooth game controllers.</string>
+	<!-- D-104: upstream v3.15.1 brought netplay (ENet over UDP): Direct Connect
+	     and LAN rooms talk to other machines on the local network, which iOS
+	     gates behind the Local Network prompt. The simulator does not enforce
+	     usage strings (D-030), so this key is carried before anything can need
+	     it. LAN discovery by broadcast also needs the multicast entitlement this
+	     app does not have: LAN rooms are expected to find nothing. -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Perfect Dark uses the local network to find and join multiplayer games.</string>
 	<key>UIFileSharingEnabled</key>
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
