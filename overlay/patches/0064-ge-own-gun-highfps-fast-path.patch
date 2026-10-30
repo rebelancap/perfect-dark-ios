@@ -1,0 +1,45 @@
+Subject: GoldenEye's guns at 120 FPS: the shot's recoil no longer flickers
+
+GitHub issue 3 (Kode-Z): under 120 Hz every GoldenEye gun - GE Plus, Goldfinger
+64 and TND64, N64 and XBLA art alike - alternated frame by frame between two
+poses for the length of its fire animation after a shot; 60 Hz was smooth and
+Perfect Dark's own guns were fine at both. Measured on a scratch clang oracle
+(Dam, PP7, a forced trigger tap, --fixed-fps 120 against --fixed-step, the
+per-frame hand state and the gun's matrices logged): the hand's state and
+recoil curve (bgun0f09aba4()) were smooth at 120, but the gun model's matrices
+jumped by about (0, -6, +7) on every frame drawn between two animation frames
+(frac 0.5) and came back on the next (frac 0), for the 50 frames of the
+animation. Those frames are the ones upstream's high-framerate pass sends
+through the C path (bgunGunTweensAll(), set var8005efb0_2/var8005efd8_2), and
+GoldenEye's own model in the hand - which plays its host's animation - is
+posed there about 9 units from where the fast path (modelasm00018680()) puts
+it: forcing the C path at 60 FPS puts it there on every frame, at whole frames
+too. Perfect Dark's guns pose the same on both paths, which is why only
+GoldenEye's flickered.
+
+GoldenEye's own model in the hand (gegunsOwnModelInUse(), which is also what
+the release's gun is skinned onto in the XBLA look) keeps the fast path above
+60 FPS, as it has at 60: tweened rotations at the frames between, measured
+smooth and monotonic through the PP7's shot. bgunGunTweensAll() is never true
+at 60 or 30 FPS (animquarter stays 0 there), so that path is unchanged. Not
+iOS-guarded: desktop has the same bug at any rate above 60; one for upstream.
+
+--- a/src/game/bondgun.c
++++ b/src/game/bondgun.c
+@@ -774,6 +774,16 @@
+  */
+ static bool bgunGunTweensAll(struct hand *hand)
+ {
++	// (overlay 0064: not GoldenEye's own model in the hand, which plays its
++	// host's animation. The C path (modelUpdateMatrices()) poses that model
++	// about 9 units from where the fast path does - the whole gun and hand,
++	// at a whole frame too - so above 60 FPS every frame drawn between two
++	// jumped and the next snapped back: a GoldenEye gun's shot flickered
++	// between two poses at 120 FPS (issue 3). The fast path, as at 60.)
++	if (gegunsOwnModelInUse(hand->gset.weaponnum)) {
++		return false;
++	}
++
+ 	return hand->animquarter > 0 && hand->gunmodel.anim && hand->gunmodel.anim->frac != 0.0f;
+ }
+ #endif
