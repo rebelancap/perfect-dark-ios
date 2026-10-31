@@ -152,21 +152,8 @@ extern unsigned int g_PdAudioDroppingSinceMs;
 int pdProfReport(char *buf, int len);
 void pdProfReset(void);
 
-// port/fast3d/gfx_api.h — upstream's own per-frame renderer counters, which
-// nothing in this port read until round P. Draw calls and texture uploads are
-// what say whether a slow frame is geometry or state.
-struct GfxTraceStats {
-	unsigned int drawcalls;
-	unsigned int tris;
-	unsigned int verts;
-	unsigned int distincttextures;
-	unsigned int texuploads;
-	unsigned int texevictions;
-	unsigned int bufferfullflushes;
-	unsigned int cacheentries;
-	unsigned int cachesize;
-};
-void gfx_trace_stats(struct GfxTraceStats *out);
+// gfx_trace_stats() and struct GfxTraceStats: app/ios/PDGfxTrace.h, which
+// includes upstream's own gfx_api.h (a mirror here went 9 fields stale; 1.0.5.2).
 
 int inputControllerConnected(int idx);
 int mainGetStageNum(void);

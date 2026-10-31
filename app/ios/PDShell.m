@@ -328,6 +328,7 @@ int pdExtraPumpMs = 0;
 		(dw == (int)lround(pts.width * scale) && dh == (int)lround(pts.height * scale)) ? @"OK" : @"MISMATCH"];
 	[s appendFormat:@"footprint_mb=%.1f\n", pdFootprintMB()];
 	[s appendFormat:@"thermal=%s\n", pdThermalName()];
+	[s appendString:PDGovernorStateLines()];
 	[s appendFormat:@"touch_overlay=%@\n", overlay ? (overlay.hidden ? @"hidden" : @"visible") : @"none"];
 	if ([overlay isKindOfClass:PDTouchOverlay.class]) {
 		[s appendString:[(PDTouchOverlay *)overlay heldReport]];
@@ -565,6 +566,10 @@ void pdIosFrameHook(void)
 		// frames before the engine is marked running.
 		[PDXbla beginUnpackIfNeeded];
 		[shell drainQueue];
+		// D-110: the thermal governor's 1 Hz poll. Here rather than on the
+		// watchdog's thread because acting on it re-paces the engine, which is
+		// this thread's job; the notification only queues one of these.
+		PDGovernorTick();
 		// Nothing audio-shaped happens here any more. Two earlier rounds put
 		// something in this spot: a 600-frame re-assert of the three eeprom
 		// volumes, then the engine callback that replaced it (D-031, overlay

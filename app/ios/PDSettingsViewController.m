@@ -759,6 +759,19 @@ static CFTimeInterval sPresentStarted;
 			// rate. Offering a rate the panel cannot serve is what made the
 			// headset read "set to 120, running at 60".
 			pdFrameRateRow(),
+#if !TARGET_OS_VISION
+			// D-110: the thermal governor's opt-out, directly under the row it
+			// overrides. Greyed (not hidden, so the section keeps its shape)
+			// whenever there is no rate above 60 for it to hold back.
+			({
+				PDRow *gov = pdSwitchRow(@"Cool-down to 60", PDDefThermalGovernor);
+				gov.enabledWhen = ^BOOL {
+					const NSInteger high = PDPanelHighHz();
+					return high > 60 && PDDefInt(PDDefRefreshHz) >= high;
+				};
+				gov;
+			}),
+#endif
 			// Render scale. The engine draws at the drawable's size and every
 			// buffer it owns is that size, so this is a launch-time input - see
 			// the footer.
@@ -1137,7 +1150,11 @@ static CFTimeInterval sPresentStarted;
 		        "the other.";
 	}
 	if ([_sections[(NSUInteger)s] isEqualToString:@"Display"]) {
-		return @"Resolution changes take effect the next time the app starts: the drawable's size "
+		return @""
+#if !TARGET_OS_VISION
+		        "120 drops to 60 while the phone is hot, then returns. "
+#endif
+		        "Resolution changes take effect the next time the app starts: the drawable's size "
 		        "is fixed when the renderer comes up and every buffer the game owns is that size. "
 		        "Lower it if the frame rate dips; Native is the panel's own.";
 	}
@@ -1321,6 +1338,14 @@ static CFTimeInterval sPresentStarted;
 			row.values[(NSUInteger)idx].stringValue.UTF8String);
 		[NSUserDefaults.standardUserDefaults setInteger:row.values[(NSUInteger)idx].integerValue forKey:row.key];
 		[self commit];
+#if !TARGET_OS_VISION
+		// The Cool-down switch under Frame rate greys with the rate (D-110).
+		// Reloaded after this turn of the run loop, not under the control that
+		// is still sending its own event.
+		if ([row.key isEqualToString:PDDefRefreshHz]) {
+			dispatch_async(dispatch_get_main_queue(), ^{ [self.tableView reloadData]; });
+		}
+#endif
 	}
 }
 

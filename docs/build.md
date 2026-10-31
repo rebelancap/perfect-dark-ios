@@ -2395,3 +2395,50 @@ PD_MULTICAST=1 PD_VISIONOS=1 scripts/publish-ota.sh "..."
 without the switch). A profile without the entitlement fails the archive in words.
 SideStore (sideloaded) builds will never have it: their LAN page stays empty and
 Direct Connect is the way. Check a build: `codesign -d --entitlements :- <app>`.
+
+## Traps earned (1.0.5.1: the Dam device round, M-057)
+
+**The phone's bridge answers on the LAN, no cable needed.** It binds `INADDR_ANY:8775`, so
+when the phone is on Wi-Fi, the test phone's `<name>.local` (resolve it with
+`dns-sd -G v4 <name>.local`) port 8775 works directly with no iproxy. `devicectl` installs and launches
+over the network too. `scripts/device-probe.sh` (iproxy/usbmux) only sees a cabled phone.
+
+**A launch on a locked phone goes straight to the background.** `devicectl device process
+launch` succeeds, the scene backgrounds 0.6 s later, iOS suspends the app, and the bridge
+goes silent. `lockState`'s `passcodeRequired: false` does NOT mean the screen is on. Check
+`Documents/lifecycle.txt` for `scene BACKGROUND`, and get the phone unlocked before spending
+a round on it.
+
+**One bridge connection carries many commands.** `+[PDBridge serve:]` loops over lines, so a
+sampler can hold one socket and send `state`, `prof`, `pacing`, `prof reset`, `pacing reset`
+once a second, ending each batch with an unknown word (`zz`). The `ERR unknown command zz`
+reply is a sentinel that closes each batch.
+
+**`gfx` overflowed the heap before 1.0.5.2** (PDShell.h mirrored `struct GfxTraceStats` at
+9 fields, upstream has 16). Fixed: `app/ios/PDGfxTrace.h` includes build/src's `gfx_api.h`
+and `_Static_assert`s the size, so the next upstream change to the struct fails the build
+instead of the app. Do not send `gfx` to a build older than 1.0.5.2.
+
+**`cfg set Mod.XblaReflections 0` did not survive a launch before 1.0.5.2.** The shell's
+whole-release apply turned every XBLA part back on when any one was off. Since D-111 the
+shell acts only when its own row moves, so a part set in the game's menu (or by `cfg set` +
+a commit or `quit`) persists. On a 1.0.5.1 or older build, set it live after the level loads.
+
+**On the charger, the menu does not cool the phone.** Five minutes in the menu at 120 Hz
+never left `serious`. Five minutes with the app quit came back at fair once and nominal once.
+The Frame rate row's 60 Hz is the pacer's target (engine 60, link 120, `TickRateDivisor`
+stays 0); that is the settings page's own mechanism, not a missed apply.
+
+## Traps earned (1.0.5.2: the thermal governor, D-110)
+
+**The governor's 120 Hz half needs `thermal-sim panel 120` on a simulator.** The sim's panel
+is 60 Hz, so the governor is `off` there (no rate above 60 to hold back) and the Cool-down
+row is greyed. `thermal-sim panel 120` stores 120 as the Frame rate and makes the governor
+and the panel-rate apply treat the panel as 120 (the display link is untouched, so the engine
+still runs at 60 in fact); `pacing_target`/`pacing_engine_hz` in `state` then show 120 -> 60
+-> 120. In-memory only; a relaunch clamps the stored rate back to 60.
+
+**Turning the Cool-down switch off counts as a restore.** Switching it back on while still hot
+reads `governor=idle` for up to 10 s (the no-drop-after-restore hysteresis) before it goes
+`active`. By design; a script that toggles it must wait 10 s before asserting `active`.
+

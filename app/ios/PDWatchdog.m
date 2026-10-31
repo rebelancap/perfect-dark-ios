@@ -1,5 +1,6 @@
 // PDWatchdog.m — heartbeat.txt, lifecycle.txt and hang.txt. PDWatchdog.h is why.
 #import "PDWatchdog.h"
+#import "PDDefaults.h"
 
 #import <UIKit/UIKit.h>
 
@@ -242,6 +243,9 @@ int PDWatchdogFormatHeartbeat(char *buf, int len)
 	PDPacingSnap p;
 	pdPacingSnapshot(&p);
 
+	PDGovernorSnap g;
+	PDGovernorSnapshot(&g);
+
 	const double now = pdNow();
 	const double sinceFrame = now - atomic_load(&sLastFrameAt);
 
@@ -290,7 +294,10 @@ int PDWatchdogFormatHeartbeat(char *buf, int len)
 		"pacing_wait_mode=%s\n"
 		"pacing_wake_us_mean=%.0f\n"
 		"pacing_wake_us_max=%.0f\n"
-		"pacing_wake_n=%llu\n",
+		"pacing_wake_n=%llu\n"
+		"governor=%s\n"
+		"governor_switches=%d\n"
+		"governor_thermal=%d\n",
 		PD_IOS_BUILD_STAMP, PD_IOS_MARKETING_VERSION,
 		(long long)time(NULL),
 		now - atomic_load(&sStartedAt),
@@ -307,7 +314,8 @@ int PDWatchdogFormatHeartbeat(char *buf, int len)
 		p.appliedLinkHz, p.measuredHz, p.targetHz, p.engineHz, p.divisor,
 		p.links, p.presents, p.dropped, p.waiting,
 		p.presentAllowed, p.earlyWait,
-		p.waitMode == 1 ? "runloop" : "sem", p.wakeUsMean, p.wakeUsMax, p.wakeSamples);
+		p.waitMode == 1 ? "runloop" : "sem", p.wakeUsMean, p.wakeUsMax, p.wakeSamples,
+		PDGovernorModeName(g.mode), g.switches, g.thermal);
 }
 
 static void pdWriteHeartbeat(void)

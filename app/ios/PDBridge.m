@@ -41,6 +41,7 @@
 #import "PDAudio.h"
 #import "PDController.h"   // round Q: `pad fake` / `pad lx`
 #import "PDWatchdog.h"     // round S: `heartbeat` / `hang` / `dump`
+#import "PDGfxTrace.h"     // `gfx`: upstream's gfx_api.h, not a mirror (1.0.5.2)
 #import "PDGeometry.h"     // D-077: `geo` / `presented` / `picker`
 #if !TARGET_OS_VISION
 #import "PDSceneDelegate.h"
@@ -243,7 +244,7 @@ static NSString *pdErr(NSString *fmt, ...)
 		        " prof [reset] | gfx |"
 		        " gamefile <defaults|save|load [dev]> |"
 		        " rom | xbla [wait N|release on|off|pick <path>] | geplus [scan|pick rom|xbla|hack <path>|release on|off] | adopt fail copy|swap|off | texpack | quit |"
-		        " heartbeat | hang <ms> | dump | graft <on|off> | hide60 <on|off> |"
+		        " heartbeat | hang <ms> | dump | graft <on|off> | hide60 <on|off> | thermal-sim <0-3|off|panel HZ|off> | governor [on|off] |"
 		        " stall <ms>|every <s> <ms>|off | geo [repair on|off|now] | presented | picker cancel|dismiss|pick <path> |"
 		        " audio trace on|off|dump [name] | audio interrupt begin|end |"
 		        " give <weaponnum> [noammo] | ammo <weaponnum> | pacing engine <hz|auto> | kbd [type <text>|back|return]"
@@ -1181,6 +1182,55 @@ static NSString *pdErr(NSString *fmt, ...)
 
 	// `graft off|on` — D-038's re-graft, live. Off only bites once the overlay
 	// exists, so it can never brick a launch (PDSceneDelegate.h).
+	// The thermal governor (D-110). `thermal-sim <0-3>` makes the governor judge
+	// that state instead of NSProcessInfo's (`off` = the real one again);
+	// `thermal-sim panel <hz|off>` treats the panel as `hz` (and stores that as
+	// the Frame rate) so the 120 Hz half is reachable on a simulator, whose panel
+	// is always 60 Hz. `governor [on|off]` is the settings row's switch, through
+	// the row's own path. Dev builds only: this whole file is compiled out of
+	// PD_PUBLIC builds.
+	if ([cmd isEqualToString:@"thermal-sim"]) {
+		if (argv.count < 2) {
+			return pdErr(@"usage: thermal-sim <0-3|off> | thermal-sim panel <hz|off>");
+		}
+		__block NSString *out = nil;
+		NSString *a1 = argv[1].lowercaseString;
+		void (^work)(void) = nil;
+		if ([a1 isEqualToString:@"panel"]) {
+			if (argv.count < 3) {
+				return pdErr(@"usage: thermal-sim panel <hz|off>");
+			}
+			const NSInteger hz = [argv[2].lowercaseString isEqualToString:@"off"] ? 0 : argv[2].integerValue;
+			if (hz != 0 && (hz < 61 || hz > 240)) {
+				return pdErr(@"panel hz out of range: %@", argv[2]);
+			}
+			work = ^{ PDGovernorSetPanelOverride(hz); };
+		} else {
+			const int st = [a1 isEqualToString:@"off"] ? -1 : a1.intValue;
+			if (![a1 isEqualToString:@"off"] && (st < 0 || st > 3
+					|| ![a1 isEqualToString:[NSString stringWithFormat:@"%d", st]])) {
+				return pdErr(@"thermal-sim: expected 0-3 or off, got %@", argv[1]);
+			}
+			work = ^{ PDGovernorSimulateThermal(st); };
+		}
+		if (![shell enqueueAndWait:^{ work(); out = PDGovernorStateLines(); } timeout:kEngineTimeout]) {
+			return pdErr(@"engine did not reach a frame boundary in %.0fs", kEngineTimeout);
+		}
+		return [out stringByAppendingString:[PDPacing.shared report]];
+	}
+
+	if ([cmd isEqualToString:@"governor"]) {
+		if (argv.count > 1) {
+			[PDSettingsViewController setSwitchRow:PDDefThermalGovernor
+				to:[argv[1].lowercaseString isEqualToString:@"on"]];
+		}
+		__block NSString *out = nil;
+		if (![shell enqueueAndWait:^{ out = PDGovernorStateLines(); } timeout:kEngineTimeout]) {
+			return pdErr(@"engine did not reach a frame boundary in %.0fs", kEngineTimeout);
+		}
+		return out;
+	}
+
 	if ([cmd isEqualToString:@"graft"]) {
 		if (argv.count > 1) {
 			pdGraftEnabled = [argv[1].lowercaseString isEqualToString:@"on"] ? 1 : 0;
@@ -1360,10 +1410,14 @@ static NSString *pdErr(NSString *fmt, ...)
 		return [NSString stringWithFormat:
 			@"gfx_drawcalls=%u\ngfx_tris=%u\ngfx_verts=%u\ngfx_distincttextures=%u\n"
 			 "gfx_texuploads=%u\ngfx_texevictions=%u\ngfx_bufferfullflushes=%u\n"
-			 "gfx_cacheentries=%u\ngfx_cachesize=%u\n",
+			 "gfx_cacheentries=%u\ngfx_cachesize=%u\n"
+			 "gfx_cachepeak=%u\ngfx_cachegrows=%u\ngfx_cacheevictions=%u\n"
+			 "gfx_cachemb=%u\ngfx_cachebudgetmb=%u\ngfx_cachemax=%u\ngfx_cachefixed=%u\n",
 			st.drawcalls, st.tris, st.verts, st.distincttextures,
 			st.texuploads, st.texevictions, st.bufferfullflushes,
-			st.cacheentries, st.cachesize];
+			st.cacheentries, st.cachesize,
+			st.cachepeak, st.cachegrows, st.cacheevictions,
+			st.cachemb, st.cachebudgetmb, st.cachemax, st.cachefixed];
 	}
 
 	// The render-scale row, from a script. It only takes effect at launch (the

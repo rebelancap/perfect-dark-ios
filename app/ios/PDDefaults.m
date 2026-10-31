@@ -14,6 +14,8 @@
 
 #include <string.h>
 #include <math.h>
+#include <stdatomic.h>
+#include <time.h>
 
 NSString *const PDDefLookDegPerPoint  = @"pd.look.degPerPoint";
 NSString *const PDDefLookDegPerPointY = @"pd.look.degPerPointY";
@@ -32,8 +34,12 @@ NSString *const PDDefRefreshHz        = @"pd.video.refreshHz";
 NSString *const PDDefRenderScalePct   = @"pd.video.renderScalePct";
 NSString *const PDDefShowFPS          = @"pd.video.showFPS";
 NSString *const PDDefHide60On120      = @"pd.video.hide60on120";
+NSString *const PDDefThermalGovernor  = @"pd.video.thermalGovernor";
 
 NSString *const PDDefXblaWholeRelease = @"pd.xbla.wholeRelease";
+// D-111: the row value last pushed into the engine. Not registered: absent
+// means "never pushed by this build", which pushes once.
+static NSString *const PDDefXblaWholeReleaseApplied = @"pd.xbla.wholeReleaseApplied";
 NSString *const PDDefXblaGoldenEye    = @"pd.xbla.goldenEye";
 NSString *const PDDefTexturePacks     = @"pd.texpacks.enabled";
 
@@ -100,6 +106,9 @@ void PDDefaultsRegister(void)
 		// the 120 -> 60 wedge. `hide60 on` over the bridge, or @YES here, is the
 		// one-line insurance for the next public build.
 		PDDefHide60On120: @NO,
+		// D-110: on. 120 Hz mode is held at 60 while the phone reports a
+		// serious thermal state; the switch under Frame rate turns it off.
+		PDDefThermalGovernor: @YES,
 
 		// D-011: the XBLA release is on whenever a package is present.
 		PDDefXblaWholeRelease: @YES,
@@ -184,6 +193,346 @@ static BOOL sPacingDeferred = NO;
 
 BOOL PDDefaultsPacingIsDeferred(void) { return sPacingDeferred; }
 
+// ---------------------------------------------------------------------------
+// The thermal governor (D-110).
+//
+// M-057, on the user's iPhone Air: GoldenEye's Dam at 120 Hz takes the phone
+// from nominal to `serious` in about two minutes; at serious the CPU clock
+// halves, the frame's CPU half (the RDP interpreter + ANGLE's encoding) doubles
+// with it, and 120 Hz mode lands at 50-60 fps with drops to 35-42. The same
+// spot at 60 Hz is a flat 60.0 with 8.7 ms of slack, even at serious. So while
+// the phone says it is hot, 120 Hz mode is run as 60 - through the row's own
+// "60" path (engine tick 60, target 60, the link divides by two; D-034, D-043),
+// never a new half-rate mode - and the player's saved rate is not touched.
+//
+//   drop:     thermal serious or critical, and at least 10 s since the last
+//             restore (no flapping on a state that sits on the boundary);
+//   restore:  thermal fair or nominal held for 30 s continuously - from
+//             critical too, there is no faster way back.
+//
+// Only when the player's rate is above 60 and `pd.video.thermalGovernor` is on
+// (the switch under Frame rate). iOS only: the headset's 3D clock is the
+// compositor's and its rate follows it (D-056), and nobody has measured a
+// thermal problem there.
+//
+// Everything here runs on the game thread: the frame hook polls once a second
+// (the notification can arrive late, or not at all on a simulator), and the
+// notification itself only queues a poll onto the frame hook.
+
+static void pdApplyPanelRate(void);
+
+static const double kGovRestoreAfterCoolS = 30.0;
+static const double kGovNoDropAfterRestoreS = 10.0;
+
+static BOOL sGovActive = NO;
+static BOOL sGovApplied = NO;          // PDDefaultsApplyToEngine has run once
+static double sGovCoolSince = 0.0;     // when the state last became fair-or-better
+static double sGovLastRestore = -1e9;
+static double sGovLastPoll = 0.0;
+static int sGovLastThermal = -1;
+static int sGovSim = -1;               // dev builds: `thermal-sim <0-3>`, -1 = the real state
+static NSInteger sPanelHighOverride = 0;   // dev builds: `thermal-sim panel <hz>`
+
+// Read by the watchdog thread for heartbeat.txt: word-sized atomics only.
+static _Atomic int sGovMode;           // 0 off, 1 idle, 2 active
+static _Atomic int sGovSwitches;
+static _Atomic int sGovThermal;
+
+static NSInteger pdPanelHigh(void)
+{
+	return sPanelHighOverride > 0 ? sPanelHighOverride : PDPanelHighHz();
+}
+
+static double pdGovNow(void)
+{
+	return (double)clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1e9;
+}
+
+static const char *pdGovThermalName(int t)
+{
+	switch (t) {
+	case 0: return "nominal";
+	case 1: return "fair";
+	case 2: return "serious";
+	case 3: return "critical";
+	}
+	return "?";
+}
+
+static int pdGovThermal(void)
+{
+	return sGovSim >= 0 ? sGovSim : (int)NSProcessInfo.processInfo.thermalState;
+}
+
+/** Is the governor allowed to act at all right now? (Mode `off` when not.) */
+static BOOL pdGovEnabled(void)
+{
+#if TARGET_OS_VISION
+	return NO;
+#else
+	if (!sGovApplied || PDShell.shared.replayRun || !PDDefBool(PDDefThermalGovernor)) {
+		return NO;
+	}
+	const NSInteger high = pdPanelHigh();
+	return high > 60 && PDDefInt(PDDefRefreshHz) >= high;
+#endif
+}
+
+/**
+ * One step of the state machine. Returns YES when the override changed, which
+ * is the caller's cue to re-pace. Never paces anything itself.
+ */
+static BOOL pdGovEvaluate(const char *why)
+{
+	const double now = pdGovNow();
+	const int t = pdGovThermal();
+	atomic_store(&sGovThermal, t);
+	if (t != sGovLastThermal) {
+		PDLifecycle("governor: thermal %s -> %s (%s%s)", pdGovThermalName(sGovLastThermal),
+			pdGovThermalName(t), why, sGovSim >= 0 ? ", SIMULATED" : "");
+		sGovLastThermal = t;
+	}
+
+	BOOL changed = NO;
+	if (!pdGovEnabled()) {
+		if (sGovActive) {
+			sGovActive = NO;
+			sGovLastRestore = now;
+			atomic_fetch_add(&sGovSwitches, 1);
+			PDLifecycle("governor: OFF while active (switch, rate or replay) -> the player's rate");
+			changed = YES;
+		}
+		sGovCoolSince = 0.0;
+		atomic_store(&sGovMode, 0);
+		return changed;
+	}
+
+	const BOOL hot = (t >= (int)NSProcessInfoThermalStateSerious);
+	if (!sGovActive) {
+		if (hot && now - sGovLastRestore >= kGovNoDropAfterRestoreS) {
+			sGovActive = YES;
+			sGovCoolSince = 0.0;
+			atomic_fetch_add(&sGovSwitches, 1);
+			PDLifecycle("governor: ACTIVE - thermal %s, %ld Hz mode held at 60 (switch %d)",
+				pdGovThermalName(t), (long)pdPanelHigh(), atomic_load(&sGovSwitches));
+			NSLog(@"perfectdark: [governor] thermal %s: %ld Hz mode held at 60",
+				pdGovThermalName(t), (long)pdPanelHigh());
+			changed = YES;
+		}
+	} else if (hot) {
+		sGovCoolSince = 0.0;
+	} else {
+		if (sGovCoolSince <= 0.0) {
+			sGovCoolSince = now;
+		}
+		if (now - sGovCoolSince >= kGovRestoreAfterCoolS) {
+			sGovActive = NO;
+			sGovCoolSince = 0.0;
+			sGovLastRestore = now;
+			atomic_fetch_add(&sGovSwitches, 1);
+			PDLifecycle("governor: IDLE - thermal %s for %.0f s, back to %ld Hz (switch %d)",
+				pdGovThermalName(t), kGovRestoreAfterCoolS, (long)pdPanelHigh(),
+				atomic_load(&sGovSwitches));
+			NSLog(@"perfectdark: [governor] cooled: back to %ld Hz", (long)pdPanelHigh());
+			changed = YES;
+		}
+	}
+	atomic_store(&sGovMode, sGovActive ? 2 : 1);
+	return changed;
+}
+
+static void pdGovPollNow(const char *why)
+{
+	sGovLastPoll = pdGovNow();
+	if (pdGovEvaluate(why)) {
+		pdApplyPanelRate();
+	}
+}
+
+void PDGovernorTick(void)
+{
+	NSCAssert(NSThread.isMainThread, @"the governor is the game thread's");
+	if (!sGovApplied) {
+		return;
+	}
+	if (pdGovNow() - sGovLastPoll < 1.0) {
+		return;
+	}
+	pdGovPollNow("poll");
+}
+
+static void pdGovObserveOnce(void)
+{
+	static dispatch_once_t once;
+	dispatch_once(&once, ^{
+		[NSNotificationCenter.defaultCenter
+			addObserverForName:NSProcessInfoThermalStateDidChangeNotification
+			            object:nil
+			             queue:nil
+			        usingBlock:^(NSNotification *note) {
+				(void)note;
+				// Any thread. The state machine is the game thread's.
+				[PDShell.shared enqueue:^{ pdGovPollNow("notification"); }];
+			}];
+	});
+}
+
+void PDGovernorSnapshot(PDGovernorSnap *out)
+{
+	out->mode = atomic_load(&sGovMode);
+	out->switches = atomic_load(&sGovSwitches);
+	out->thermal = atomic_load(&sGovThermal);
+}
+
+const char *PDGovernorModeName(int mode)
+{
+	return mode == 2 ? "active" : mode == 1 ? "idle" : "off";
+}
+
+NSString *PDGovernorStateLines(void)
+{
+	const double now = pdGovNow();
+	return [NSString stringWithFormat:
+		@"governor=%s\ngovernor_switches=%d\ngovernor_thermal=%s\ngovernor_sim=%d\n"
+		 "governor_enabled_pref=%d\ngovernor_cool_s=%.1f\ngovernor_since_restore_s=%.1f\n"
+		 "governor_user_hz=%ld\ngovernor_panel_high=%ld\n",
+		PDGovernorModeName(atomic_load(&sGovMode)), atomic_load(&sGovSwitches),
+		pdGovThermalName(pdGovThermal()), sGovSim, (int)PDDefBool(PDDefThermalGovernor),
+		sGovCoolSince > 0.0 ? now - sGovCoolSince : 0.0,
+		sGovLastRestore > 0.0 ? now - sGovLastRestore : -1.0,
+		(long)PDDefInt(PDDefRefreshHz), (long)pdPanelHigh()];
+}
+
+#ifndef PD_PUBLIC
+void PDGovernorSimulateThermal(int state)
+{
+	NSCAssert(NSThread.isMainThread, @"the governor is the game thread's");
+	sGovSim = (state >= 0 && state <= 3) ? state : -1;
+	PDLifecycle("governor: thermal-sim %d", sGovSim);
+	pdGovPollNow("thermal-sim");
+}
+
+void PDGovernorSetPanelOverride(NSInteger hz)
+{
+	NSCAssert(NSThread.isMainThread, @"the governor is the game thread's");
+	sPanelHighOverride = hz > 60 ? hz : 0;
+	if (sPanelHighOverride > 0) {
+		[NSUserDefaults.standardUserDefaults setInteger:sPanelHighOverride forKey:PDDefRefreshHz];
+	}
+	PDLifecycle("governor: panel-high override %ld (an instrument; the link is untouched)",
+		(long)sPanelHighOverride);
+	pdGovEvaluate("panel override");
+	pdApplyPanelRate();
+}
+#endif
+
+/**
+ * The panel rate: the Frame rate row, clamped to the panel, with the thermal
+ * governor's override on top (D-110). Its own function since D-110 so that the
+ * governor can re-pace without re-running every other setting. Game thread.
+ */
+static void pdApplyPanelRate(void)
+{
+	// D-034. The panel rate the player asked for, clamped to what the panel
+	// has - and then the ENGINE's own tick gate set to match it, which is
+	// the half that was missing in 0.0.0.6.
+	//
+	// `Game.TickRateDivisor` is g_TickRateDiv (main.c:64,297), copied into
+	// g_Vars.mininc60 every frame (timing.c:74) and spun on at the top of
+	// frametimeCalculate(): at its default 1 the engine refuses to BEGIN a
+	// frame until a 60th of a second has passed, so a 120 Hz display link
+	// over it serves every other callback and the frames that do land land
+	// unevenly. 0 is upstream's own "uncap tickrate" (the Extended Options
+	// checkbox, optionsmenu.c:992), and it is not a hack: lvupdate60f is
+	// diffframe240 * 0.25 (lv.c:2347), so at 120 fps every frame advances
+	// the sim by exactly half a 60 Hz tick and motion is genuinely smooth
+	// rather than doubled.
+	// D-056: the row's high option is the PANEL's maximum, so "not 60" means
+	// "whatever this panel can do" — 120 on a ProMotion phone, 90 on this
+	// Vision Pro. The old form was `>= 120 && max >= 120 ? 120 : 60`, which
+	// silently floored a 90 Hz headset at 60 however the row was set.
+	//
+	// A value stored by an EARLIER build can be above this panel's maximum
+	// (0.0.0.9's row offered 120 on the headset and the user selected it), so
+	// it is clamped here and WRITTEN BACK — otherwise the segmented control
+	// would show no selection at all for a rate the engine is not using.
+	const NSInteger high = pdPanelHigh();
+	if (PDDefInt(PDDefRefreshHz) > high) {
+		PDLifecycle("defaults: refreshHz %ld is above this panel's %ld — clamped",
+			(long)PDDefInt(PDDefRefreshHz), (long)high);
+		[NSUserDefaults.standardUserDefaults setInteger:high forKey:PDDefRefreshHz];
+	}
+	const NSInteger userWant = PDDefInt(PDDefRefreshHz) >= high ? high : 60;
+	// D-110: the thermal governor's runtime override. The player's saved rate
+	// is left alone; only what the pacer and the engine are told changes, and
+	// it is told exactly what the row's own "60" tells them.
+	const NSInteger want = (userWant > 60 && sGovActive) ? 60 : userWant;
+	// ...but NOT while the settings page is on screen (D-041 round 2).
+	//
+	// The user: "it doesn't break the touch screen when I change from 60 to
+	// 120 fps" - only 120 -> 60, twice, on two builds. That direction is
+	// the only one that turns the ENGINE's tick gate back ON
+	// (Game.TickRateDivisor 0 -> 1, a sysSleep spin at the top of
+	// frametimeCalculate) and SHRINKS the display link's frame-rate range,
+	// and the 0.4 s coalescer in -[PDSettingsViewController commit] lands
+	// it while the page's own UIWindow is key and a UIKit transition may
+	// still be in flight. Re-pacing the main thread underneath UIKit at
+	// that moment is the one thing this port does that could stop touches
+	// being delivered while leaving hit-testing, the engine and the bridge
+	// all perfect - which is exactly the state he reaches.
+	//
+	// So it waits. +[PDSettingsViewController dismiss] re-applies, on the
+	// frame hook, with the page already gone.
+	if (PDSettingsViewController.isPresented) {
+		sPacingDeferred = YES;
+		PDLifecycle("defaults: panel rate %ld Hz DEFERRED (settings page is up)", (long)want);
+		NSLog(@"perfectdark: [defaults] panel rate %ld Hz DEFERRED - the settings page is up",
+			(long)want);
+	} else {
+		sPacingDeferred = NO;
+		PDLifecycle("defaults: applying panel rate %ld Hz (tick gate -> 0, engine+target %ld)",
+			(long)want, (long)want);
+		// The tick gate is OFF on iOS at EVERY rate, and that is the
+		// round-R fix for the user's dead touch (D-043).
+		//
+		// D-034 set the divisor to 1 at 60 Hz, reasoning that the engine's
+		// gate should match the panel. It should not: on iOS the display
+		// link is the ONE pacer (docs/pacing.md), and the gate is a second
+		// wait on the same clock - the exact thing that document exists to
+		// forbid, arriving this time as
+		//
+		//     do { ... if (g_TickExtraSleep) sysSleep(EXTRA_SLEEP_TIME); }
+		//     while (g_Vars.mininc60 && diffframe60 < g_Vars.mininc60);
+		//
+		// (timing.c:41-54). With mininc60 = 1 that loop parks the MAIN
+		// thread in nanosleep(), at the top of the frame, right after the
+		// pacer has already waited there for the link (D-040). The main
+		// thread is this app's game thread AND its UIKit thread, so while
+		// it is in there the run loop turns only in SDL's own event pump -
+		// and the HID event source never gets serviced. Touch delivery
+		// stops dead while hit-testing, the windows, the key window, the
+		// engine, the bridge and even the bridge's own main-queue blocks
+		// all stay perfect, which is precisely the state the user reached.
+		//
+		// It explains his asymmetry exactly: 60 -> 120 sets the divisor to
+		// 0 and never breaks; 120 -> 60 set it to 1 and broke every time,
+		// on three builds. PROVEN LIVE on the broken instance over USB:
+		// `cfg set Game.TickRateDivisor 0` and nothing else, and
+		// ui_touches_began went 14 -> 30 -> 35 while he tapped, having not
+		// moved for any of the six window-level recoveries.
+		//
+		// Nothing is lost by turning it off at 60. lvupdate60f is
+		// diffframe240 * 0.25 (lv.c:2347), so the sim advances by the real
+		// elapsed time whatever the rate; at a link-paced 60 fps that is
+		// one 60 Hz tick a frame, which is what the gate was there to
+		// enforce. It is upstream's own "uncap tickrate" (optionsmenu.c).
+		pdSetInt("Game.TickRateDivisor", 0);
+		PDPacing.shared.engineTickHz = want;
+		PDPacing.shared.targetHz = want;
+		PDLifecycle("defaults: panel rate applied (tick_rate_div=%d)", g_TickRateDiv);
+	}
+}
+
 void PDDefaultsApplyToEngine(void)
 {
 	NSCAssert(NSThread.isMainThread, @"engine state is the game thread's");
@@ -235,115 +584,14 @@ void PDDefaultsApplyToEngine(void)
 	// machine cannot re-arm the busy-wait limiter (docs/pacing.md).
 	pdSetInt("Video.VSync", 0);
 	pdSetInt("Video.FramerateLimit", 0);
-	{
-		// D-034. The panel rate the player asked for, clamped to what the panel
-		// has - and then the ENGINE's own tick gate set to match it, which is
-		// the half that was missing in 0.0.0.6.
-		//
-		// `Game.TickRateDivisor` is g_TickRateDiv (main.c:64,297), copied into
-		// g_Vars.mininc60 every frame (timing.c:74) and spun on at the top of
-		// frametimeCalculate(): at its default 1 the engine refuses to BEGIN a
-		// frame until a 60th of a second has passed, so a 120 Hz display link
-		// over it serves every other callback and the frames that do land land
-		// unevenly. 0 is upstream's own "uncap tickrate" (the Extended Options
-		// checkbox, optionsmenu.c:992), and it is not a hack: lvupdate60f is
-		// diffframe240 * 0.25 (lv.c:2347), so at 120 fps every frame advances
-		// the sim by exactly half a 60 Hz tick and motion is genuinely smooth
-		// rather than doubled.
-		// D-056: the row's high option is the PANEL's maximum, so "not 60" means
-		// "whatever this panel can do" — 120 on a ProMotion phone, 90 on this
-		// Vision Pro. The old form was `>= 120 && max >= 120 ? 120 : 60`, which
-		// silently floored a 90 Hz headset at 60 however the row was set.
-		//
-		// A value stored by an EARLIER build can be above this panel's maximum
-		// (0.0.0.9's row offered 120 on the headset and the user selected it), so
-		// it is clamped here and WRITTEN BACK — otherwise the segmented control
-		// would show no selection at all for a rate the engine is not using.
-		const NSInteger high = PDPanelHighHz();
-		if (PDDefInt(PDDefRefreshHz) > high) {
-			PDLifecycle("defaults: refreshHz %ld is above this panel's %ld — clamped",
-				(long)PDDefInt(PDDefRefreshHz), (long)high);
-			[NSUserDefaults.standardUserDefaults setInteger:high forKey:PDDefRefreshHz];
-		}
-		const NSInteger want = PDDefInt(PDDefRefreshHz) >= high ? high : 60;
-		// ...but NOT while the settings page is on screen (D-041 round 2).
-		//
-		// The user: "it doesn't break the touch screen when I change from 60 to
-		// 120 fps" - only 120 -> 60, twice, on two builds. That direction is
-		// the only one that turns the ENGINE's tick gate back ON
-		// (Game.TickRateDivisor 0 -> 1, a sysSleep spin at the top of
-		// frametimeCalculate) and SHRINKS the display link's frame-rate range,
-		// and the 0.4 s coalescer in -[PDSettingsViewController commit] lands
-		// it while the page's own UIWindow is key and a UIKit transition may
-		// still be in flight. Re-pacing the main thread underneath UIKit at
-		// that moment is the one thing this port does that could stop touches
-		// being delivered while leaving hit-testing, the engine and the bridge
-		// all perfect - which is exactly the state he reaches.
-		//
-		// So it waits. +[PDSettingsViewController dismiss] re-applies, on the
-		// frame hook, with the page already gone.
-		if (PDSettingsViewController.isPresented) {
-			sPacingDeferred = YES;
-			PDLifecycle("defaults: panel rate %ld Hz DEFERRED (settings page is up)", (long)want);
-			NSLog(@"perfectdark: [defaults] panel rate %ld Hz DEFERRED - the settings page is up",
-				(long)want);
-		} else {
-			sPacingDeferred = NO;
-			PDLifecycle("defaults: applying panel rate %ld Hz (tick gate -> 0, engine+target %ld)",
-				(long)want, (long)want);
-			// The tick gate is OFF on iOS at EVERY rate, and that is the
-			// round-R fix for the user's dead touch (D-043).
-			//
-			// D-034 set the divisor to 1 at 60 Hz, reasoning that the engine's
-			// gate should match the panel. It should not: on iOS the display
-			// link is the ONE pacer (docs/pacing.md), and the gate is a second
-			// wait on the same clock - the exact thing that document exists to
-			// forbid, arriving this time as
-			//
-			//     do { ... if (g_TickExtraSleep) sysSleep(EXTRA_SLEEP_TIME); }
-			//     while (g_Vars.mininc60 && diffframe60 < g_Vars.mininc60);
-			//
-			// (timing.c:41-54). With mininc60 = 1 that loop parks the MAIN
-			// thread in nanosleep(), at the top of the frame, right after the
-			// pacer has already waited there for the link (D-040). The main
-			// thread is this app's game thread AND its UIKit thread, so while
-			// it is in there the run loop turns only in SDL's own event pump -
-			// and the HID event source never gets serviced. Touch delivery
-			// stops dead while hit-testing, the windows, the key window, the
-			// engine, the bridge and even the bridge's own main-queue blocks
-			// all stay perfect, which is precisely the state the user reached.
-			//
-			// It explains his asymmetry exactly: 60 -> 120 sets the divisor to
-			// 0 and never breaks; 120 -> 60 set it to 1 and broke every time,
-			// on three builds. PROVEN LIVE on the broken instance over USB:
-			// `cfg set Game.TickRateDivisor 0` and nothing else, and
-			// ui_touches_began went 14 -> 30 -> 35 while he tapped, having not
-			// moved for any of the six window-level recoveries.
-			//
-			// Nothing is lost by turning it off at 60. lvupdate60f is
-			// diffframe240 * 0.25 (lv.c:2347), so the sim advances by the real
-			// elapsed time whatever the rate; at a link-paced 60 fps that is
-			// one 60 Hz tick a frame, which is what the gate was there to
-			// enforce. It is upstream's own "uncap tickrate" (optionsmenu.c).
-			pdSetInt("Game.TickRateDivisor", 0);
-			PDPacing.shared.engineTickHz = want;
-			PDPacing.shared.targetHz = want;
-			PDLifecycle("defaults: panel rate applied (tick_rate_div=%d)", g_TickRateDiv);
-		}
-	}
+	// D-110: the governor's state first (its switch or the rate may just have
+	// moved), then the panel rate it overrides.
+	sGovApplied = YES;
+	pdGovObserveOnce();
+	sGovLastPoll = pdGovNow();
+	pdGovEvaluate("apply");
+	pdApplyPanelRate();
 
-	// One switch, all five parts (D-032). The parts are written first so that a
-	// pd.ini which had one of them off cannot leave the release half-applied;
-	// the whole-release switch is applied last because it writes all five
-	// itself (xblaswitch.c).
-	{
-		const BOOL on = PDDefBool(PDDefXblaWholeRelease);
-		pdSetInt("Mod.XblaMeshes", on);
-		pdSetInt("Mod.XblaMeshTextures", on);
-		pdSetInt("Mod.XblaStages", on);
-		pdSetInt("Mod.XblaFont", on);
-		pdSetInt("Mod.XblaExplosions", on);
-	}
 	// GoldenEye XBLA's switch (D-081). The engine reads it ONCE a run, at
 	// startup and from pd.ini (overlay 0050: the Combat Simulator's pool is
 	// built from the release then), so pd.ini is written the moment it moves:
@@ -356,11 +604,48 @@ void PDDefaultsApplyToEngine(void)
 			PDDefBool(PDDefXblaGoldenEye) ? 1 : 0, gebeanSwitchIsOn());
 	}
 
-	// Same rule: xblaSwitchSetEnabled() reloads meshes and rooms, and
-	// texpackSetLoadEnabled() drops replacements - neither is free, and neither
-	// is asked for when the answer is already what it is.
-	if (xblaImportIsAvailable() && xblaSwitchGetEnabled() != (PDDefBool(PDDefXblaWholeRelease) ? 1 : 0)) {
-		xblaSwitchSetEnabled(PDDefBool(PDDefXblaWholeRelease));
+	// The whole-release row (D-032), and ONLY when the row itself moved (D-111).
+	//
+	// The row is the shell's; the release's seven parts are the game's, and the
+	// Xbox 360 (XBLA) page in the game's own menu sets them one by one
+	// (Reflections, Skies, ...) into pd.ini. Until 1.0.5.2 this compared the row
+	// with xblaSwitchGetEnabled() - which is the AND of all seven parts - so one
+	// part the player had unticked read as "the release is off", the row said
+	// on, and the whole release was switched back on at every launch and every
+	// settings commit: Reflections could not stay off. Now the shell remembers
+	// the row value it last pushed (`pd.xbla.wholeReleaseApplied`) and acts only
+	// when the row differs from that, so a mixed set made in the game's menu
+	// survives. With nothing remembered yet (the first launch of this build) it
+	// pushes once, which is what every earlier build did on every launch.
+	//
+	// The push itself is F6's: xblaSwitchSetEnabled() sets all seven parts with
+	// each setter's own reload of meshes, rooms and textures. The parts are NOT
+	// pre-written into the config first any more - every setter returns early
+	// when its value is already the one asked for, so writing the key first
+	// skipped exactly the reload the switch exists to do. Without a release
+	// there is nothing to reload, and the keys are written so that pd.ini says
+	// what the row says when one arrives.
+	{
+		NSUserDefaults *ud = NSUserDefaults.standardUserDefaults;
+		const BOOL on = PDDefBool(PDDefXblaWholeRelease);
+		id applied = [ud objectForKey:PDDefXblaWholeReleaseApplied];
+		if (![applied isKindOfClass:NSNumber.class] || [applied boolValue] != on) {
+			if (xblaImportIsAvailable()) {
+				xblaSwitchSetEnabled(on ? 1 : 0);
+			} else {
+				pdSetInt("Mod.XblaMeshes", on);
+				pdSetInt("Mod.XblaMeshTextures", on);
+				pdSetInt("Mod.XblaStages", on);
+				pdSetInt("Mod.XblaFont", on);
+				pdSetInt("Mod.XblaExplosions", on);
+				pdSetInt("Mod.XblaSkies", on);
+				pdSetInt("Mod.XblaReflections", on);
+			}
+			[ud setBool:on forKey:PDDefXblaWholeReleaseApplied];
+			PDLifecycle("defaults: XBLA whole release -> %d (row moved; was %s, available=%d)",
+				(int)on, applied ? ([applied boolValue] ? "1" : "0") : "never applied",
+				xblaImportIsAvailable());
+		}
 	}
 
 	// The master gain: volume x mute x the other-app duck, one multiplier the

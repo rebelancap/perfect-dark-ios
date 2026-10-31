@@ -159,3 +159,42 @@ NS_ASSUME_NONNULL_END
  * dismiss re-applies when this is YES.
  */
 BOOL PDDefaultsPacingIsDeferred(void);
+
+NS_ASSUME_NONNULL_BEGIN
+
+/**
+ * The thermal governor (D-110, PDDefaults.m). `pd.video.thermalGovernor`, BOOL,
+ * default YES: while NSProcessInfo says `serious` or `critical`, a player whose
+ * Frame rate is the panel's high rate (120) is run at 60 through the row's own
+ * 60 path; fair-or-better for 30 s restores it, and nothing drops again within
+ * 10 s of a restore. The saved rate is never written. iOS only.
+ */
+extern NSString *const PDDefThermalGovernor;
+
+/** The frame hook's 1 Hz poll (game thread). Cheap when not due. */
+void PDGovernorTick(void);
+
+/** For a thread that may not allocate (PDWatchdog.m): word-sized copies. */
+typedef struct {
+	int mode;      // 0 off, 1 idle, 2 active
+	int switches;  // transitions either way since launch
+	int thermal;   // the state the governor last judged (0..3)
+} PDGovernorSnap;
+void PDGovernorSnapshot(PDGovernorSnap *out);
+const char *PDGovernorModeName(int mode);
+
+/** `governor=...` lines for the bridge's `state`. */
+NSString *PDGovernorStateLines(void);
+
+#ifndef PD_PUBLIC
+/** Dev builds: judge this thermal state (0..3) instead of the real one; -1 = real. */
+void PDGovernorSimulateThermal(int state);
+/**
+ * Dev builds: treat the panel's high rate as `hz` (and store it as the Frame
+ * rate) so the 120 Hz half of the state machine can be reached on a simulator,
+ * whose panel is always 60 Hz. The display link is untouched. 0 = off.
+ */
+void PDGovernorSetPanelOverride(NSInteger hz);
+#endif
+
+NS_ASSUME_NONNULL_END
