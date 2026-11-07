@@ -47,6 +47,7 @@ extern NSString *const PDDefHaptics;           // bool
  * the engine has disabled is a gesture that does nothing.
  */
 extern NSString *const PDDefDoubleTapRoll;     // bool
+extern NSString *const PDDefFireDragLooks;     // bool — hold FIRE and drag that finger to look (D-113)
 
 // Control style (Q-003 / D-022). 0 = dual analogue: the touch stick is
 // analogue MOVEMENT on the right stick and the drag is look, which is what

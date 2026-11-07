@@ -730,6 +730,9 @@ static CFTimeInterval sPresentStarted;
 			// One setting, both gestures (D-037): a double tap of the touch
 			// stick, and a double flick of a gamepad's left stick.
 			pdSwitchRow(@"Double-tap / double-flick stick to roll", PDDefDoubleTapRoll),
+			// D-113 (GitHub issue #4, as Project Midas has it): hold FIRE and the
+			// same finger's drag turns the view, the way AIM's already does.
+			pdSwitchRow(@"Drag Fire to look", PDDefFireDragLooks),
 			// The layout editor - which now owns the size as well, so there is
 			// no "Button size" row here. Closing this page first is not
 			// tidiness: the settings window sits at UIWindowLevelAlert over the

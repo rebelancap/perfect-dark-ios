@@ -524,6 +524,7 @@ static const PDButtonSpec kMenuButtons[] = {
 	// belt-and-braces refresh every 60th publish.
 	CGFloat _cLookDegX, _cLookDegY, _cLookInvert;
 	BOOL _cDoubleTapRoll;
+	BOOL _cFireDragLooks;      // D-113: FIRE / FIRE_L hold-and-drag turn the view like AIM
 	NSInteger _cControlStyle;
 	uint32_t _publishes;
 
@@ -943,6 +944,17 @@ static NSMutableSet<NSString *> *pdHiddenLabels(void)
 - (BOOL)isAimChip:(PDTouchButtonView *)b
 {
 	return b != nil && b != _leftFire && (b.mask & PDPadR) != 0;
+}
+
+/** The chips whose held finger drives the look: AIM always (D-046), and FIRE
+ *  plus its aim-mode mirror FIRE_L when "Drag Fire to look" is on (D-113,
+ *  GitHub issue #4 - the Project Midas behaviour). FIRE is PDPadG, the only
+ *  chips carrying that bit; the mask, not the label, so a custom layout keeps
+ *  working. The first such finger owns the drag; a second does not add. */
+- (BOOL)dragsLook:(PDTouchButtonView *)b
+{
+	if ([self isAimChip:b]) { return YES; }
+	return _cFireDragLooks && b != nil && (b.mask & PDPadG) != 0;
 }
 
 /** The AIM finger's drag, fed to the same absolute view-angle path the look
@@ -1543,6 +1555,7 @@ static const CGFloat kWheelRadius = 32.0;
 	if (_cLookDegY <= 0) { _cLookDegY = _cLookDegX; }
 	_cLookInvert = PDDefBool(PDDefInvertY) ? -1.0 : 1.0;
 	_cDoubleTapRoll = PDDefBool(PDDefDoubleTapRoll);
+	_cFireDragLooks = PDDefBool(PDDefFireDragLooks);
 	_cControlStyle = PDDefInt(PDDefControlStyle);
 	_userHidden = pdHiddenLabels();
 }
@@ -2165,7 +2178,7 @@ static const CGFloat kWheelRadius = 32.0;
 		// bean's hold-and-drag AIM: the pressing finger becomes the aim
 		// surface. Armed even for a synthetic press (touch == nil) so the
 		// bridge drives the same path a thumb does.
-		if ([self isAimChip:b] && !_aimDragArmed) {
+		if ([self dragsLook:b] && !_aimDragArmed) {
 			_aimDragArmed = YES;
 			_aimDragTouch = touch;
 			_aimDragLast = p;
@@ -2568,7 +2581,9 @@ static CGVector pdStickCurve(CGVector raw)
 			[_buttonTouches removeObjectForKey:t];
 			// The lift leaves aim mode: PD's aim button is HOLD by default
 			// (AIMCONTROL_HOLD, bondmove.c:951), so dropping R is all it takes.
-			if ([self isAimChip:b] || (_aimDragTouch && t == _aimDragTouch)) {
+			// Only the finger that owns the drag (or a synthetic press, which has
+			// no touch) releases it: lifting FIRE must not drop AIM's live drag.
+			if ((_aimDragTouch && t == _aimDragTouch) || (!_aimDragTouch && [self dragsLook:b])) {
 				[self clearAimDrag];
 			}
 			// The lift is the choice: the button and the stick go together, so
@@ -2877,7 +2892,7 @@ static CGVector pdStickCurve(CGVector raw)
 		PD_NOTE(b.label ?: @"chip", t);
 		if (b) {
 			[self liftChip:b latch:NO];   // a dead touch is not a tap
-			if ([self isAimChip:b]) { [self clearAimDrag]; }
+			if (t == _aimDragTouch || (!_aimDragTouch && [self dragsLook:b])) { [self clearAimDrag]; }
 			if ([self isWheelChip:b]) { [self clearWheel]; }
 		}
 		[_buttonTouches removeObjectForKey:t];
@@ -3227,11 +3242,11 @@ static CGVector pdStickCurve(CGVector raw)
 		// path, which must never become a press.
 		[self liftChip:b latch:(ms == 0)];
 		if (ms < 0) {
-			if ([self isAimChip:b]) { [self clearAimDrag]; }
+			if ([self dragsLook:b]) { [self clearAimDrag]; }
 			if ([self isWheelChip:b]) { [self clearWheel]; }
 			return [what stringByAppendingString:@" hold=cancel"];
 		}
-		if ([self isAimChip:b]) { [self clearAimDrag]; }
+		if ([self dragsLook:b]) { [self clearAimDrag]; }
 		if ([self isWheelChip:b]) { [self clearWheel]; }
 		return [what stringByAppendingString:@" hold=0"];
 	}
@@ -3239,7 +3254,7 @@ static CGVector pdStickCurve(CGVector raw)
 		dispatch_get_main_queue(), ^{
 			if (b) {
 				[self liftChip:b latch:YES];
-				if ([self isAimChip:b]) { [self clearAimDrag]; }
+				if ([self dragsLook:b]) { [self clearAimDrag]; }
 				if ([self isWheelChip:b]) { [self clearWheel]; }
 			} else if (self->_menuOpen) {
 				[self liftPointerAt:p];
@@ -3296,7 +3311,7 @@ static CGVector pdStickCurve(CGVector raw)
 
 	[self beginTouchAt:p touch:nil];
 	PDTouchButtonView *aimChip = [self buttonAtPoint:p];
-	if (![self isAimChip:aimChip] && ![self isWheelChip:aimChip]) {
+	if (![self dragsLook:aimChip] && ![self isWheelChip:aimChip]) {
 		aimChip = nil;   // (or the WHEEL chip: the same hold-drag-lift, D-085)
 	}
 	NSLog(@"perfectdark: [touch] stream %@ %d steps of %.1f,%.1f every %.1f ms",
