@@ -1,0 +1,83 @@
+Subject: GoldenEye levels: a guard sent to a pad on a wall stops off the wall, as in GoldenEye
+
+GitHub issue 5 (Kode-Z): in Bunker 1 the guard who runs for the alarm "runs
+around in circles" by it. Not a frame-rate bug: it circled at 30, 60 and 120
+FPS on the clang oracle (M-059). The cause is a line of GoldenEye that the
+conversion's guards never ran. GoldenEye's chrGoToPad() (the decomp's
+chraction.c) sends a guard to a pad that does not face up - one
+on a wall, as an alarm's, a console's or a keyboard's - not to the pad but to
+the point 1.1 body widths out from it along its up vector, off the wall
+(where GoldenEye's tile walk from the pad reaches that point; where it does
+not, GoldenEye does not send him at all). Perfect Dark's chrGoToPad() goes to
+the pad itself, and every GoldenEye RunToPad/WalkToPad/RunToPadPreset of a
+converted mission comes through it.
+
+Bunker 1's alarm is pad 127, up (-1, 0, 0), 5.7 units off its wall. Sent to the
+pad, the guard came at it along the wall; chrNavCanSeeNextPos()'s side line,
+1.2 widths off the route, then ends 18 inside the wall, the pad is never
+"seen", the wall is taken for an obstacle and he is routed round its corner,
+over and over, until one pass happens to come within 30 of the pad: 3 to 38 s.
+On the GoldenEye decomp's own build of Bunker 1 (scratch, round 2 of D-117) the
+same guard's target is the pad plus 22 along its up: GoldenEye's
+coordinates (-1208.7, 3063.1) for a pad at (-1186.7, 3063.1), which is ours,
+offset, to the unit. Sent there, the side line ends clear of the wall and he
+runs to it: forced sighting, alarm 1.9 s after he starts at 30 and 60 FPS and
+2.8 s at 120 (stock 11.2 and 22.4; GoldenEye 1.7).
+
+Only on a level converted from GoldenEye (geRoomActive()) and only for a
+GoldenEye chr (not a simulant); a pad that faces up is gone to as before, and
+so is any pad where the tile graph cannot say (no graph, or no tile under the
+pad). Perfect Dark's own levels never take the branch.
+
+--- a/src/game/chraction.c
++++ b/src/game/chraction.c
+@@ -8875,11 +8875,48 @@
+ 			RoomNum rooms[2];
+ 			struct pad pad;
+ 
+-			padUnpack(padnum, PADFIELD_ROOM | PADFIELD_POS, &pad);
++			padUnpack(padnum, PADFIELD_ROOM | PADFIELD_POS
++#ifndef PLATFORM_N64
++					| PADFIELD_UP
++#endif
++					, &pad);
+ 
+ 			rooms[0] = pad.room;
+ 			rooms[1] = -1;
+ 
++#ifndef PLATFORM_N64
++			// (overlay 0065) On a level converted from GoldenEye, GoldenEye's
++			// own chrGoToPad(): a pad that does not face up - one on a wall,
++			// as an alarm's, a console's or a keyboard's is - is gone to 1.1
++			// body widths out along its up, off the wall, where the walk
++			// along the tile graph from the pad reaches; where it does not,
++			// GoldenEye does not go at all. Perfect Dark goes to the pad
++			// itself. Bunker 1's alarm (pad 127) is 5.7 from its wall, so
++			// the guard sent to it was sent into the wall's foot: the side
++			// lines of chrNavCanSeeNextPos() ended inside the wall, the pad
++			// was never "seen" and he circled the corner until a pass came
++			// within 30 of it (GitHub issue 5) - 3 to 38 s at every rate,
++			// where GoldenEye's own guard, sent 22 out, runs to it.
++			if (geRoomActive() && chr->aibot == NULL && pad.up.y < 0.5f) {
++				struct coord region;
++				s32 reaches;
++
++				region.x = pad.pos.x + pad.up.x * (chr->radius * 1.1f);
++				region.y = pad.pos.y + pad.up.y * (chr->radius * 1.1f);
++				region.z = pad.pos.z + pad.up.z * (chr->radius * 1.1f);
++
++				reaches = geStanWalkReaches(&pad.pos, region.x, region.z);
++
++				if (reaches == 1) {
++					return chrGoToRoomPos(chr, &region, rooms, goposflags);
++				}
++
++				if (reaches == 0) {
++					return false;
++				}
++			}
++#endif
++
+ 			if (chrGoToRoomPos(chr, &pad.pos, rooms, goposflags)) {
+ 				return true;
+ 			}

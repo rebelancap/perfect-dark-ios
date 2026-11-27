@@ -2442,3 +2442,23 @@ still runs at 60 in fact); `pacing_target`/`pacing_engine_hz` in `state` then sh
 reads `governor=idle` for up to 10 s (the no-drop-after-restore hysteresis) before it goes
 `active`. By design; a script that toggles it must wait 10 s before asserting `active`.
 
+## Traps earned (D-116: third person, issue #6)
+
+**Upstream has no third-person key.** `Mod.ThirdPerson*` in pd.ini are camera TUNING only; the
+on/off is `player->thirdperson`, a runtime request the CK_1000 bind toggles on its press edge and
+`playermgr.c` clears at every stage start. A switch that writes a config key would do nothing.
+
+**Any button skips a cutscene** (`playerTickCutscene`, `buttons & 0xffffffff`), CK_1000 included.
+A shell that presses a bind "at stage start" must wait for `tickmode == TICKMODE_NORMAL` - which
+is what `player_thirdperson_ready` (overlay 0066) answers. Chicago's intro runs ~42 s from
+`stage 0x1d`; `--boot-stage 0x1d` skips it.
+
+**`simctl spawn <udid> defaults write <bundle-id> ...` stops reaching the app once the app has
+written that key itself.** The first write of a never-written key worked; after the in-app write,
+a bundle-id write was silently ignored (the app kept reading its own value) and `defaults read
+<bundle-id>` from outside kept showing the stale outside value. Writing through the CONTAINER
+path from inside the simulator does reach the next launch: `xcrun simctl spawn <udid> defaults
+write <data-container>/Library/Preferences/com.rebelancap.perfectdark <key> -bool NO`, with the
+app terminated, read back with the same path form. (The older trap above is the HOST-side plist
+edit, which cfprefsd ignores.)
+

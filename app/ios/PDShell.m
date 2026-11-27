@@ -354,6 +354,13 @@ int pdExtraPumpMs = 0;
 		[s appendFormat:@"player_gun=%d\nplayer_gunfunc=%d\nplayer_gunhas2nd=%d\n"
 			@"player_ge_level=%d\nplayer_wheel=%d\nplayer_wheel_slot=%d\n",
 			gun, gunfn, playerIosGunHasSecondary(), playerIosOnGoldenEyeLevel(), amopen, amslot];
+		// D-116: third person from the engine - the request the CK_1000 bind
+		// toggles, and whether the camera is actually out this frame.
+		int tpEff = 0, tpAllowed = 0, tpReady = 0, tpStage = 0, tpLv = 0;
+		const int tpReq = playerIosThirdPerson(&tpEff, &tpAllowed, &tpReady, &tpStage, &tpLv);
+		[s appendFormat:@"player_thirdperson=%d\nplayer_thirdperson_effective=%d\n"
+			@"player_thirdperson_allowed=%d\nplayer_thirdperson_ready=%d\n",
+			tpReq, tpEff, tpAllowed, tpReady];
 	}
 	[s appendString:[PDPacing.shared report]];
 	// The 120 -> 60 bisect rows (D-044): what the ENGINE and the window layer

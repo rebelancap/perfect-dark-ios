@@ -81,6 +81,7 @@ entirely the wrong reason. If it truly cannot bind it says
 | `touch <auto\|on\|off>` | the on-screen controls' mode — the same setting the settings page writes (D-017). The gate needs it because the simulator reports a virtual "Gamepad" and auto would hide the layer under test |
 | `link <url>` | feeds a `perfectdark://` URL into the same queue the system's own delivery uses, so the parse-and-consume half is testable (the delivery half is not: see below) |
 | `crash yes-really` | deliberately faults the app, to prove `Documents/crash.txt` gets a usable backtrace. Dev builds only, like everything in this file |
+| `settings <section> <row>` | the page, with row `n` of that section scrolled to the top (D-116): a row below the fold can be screenshotted. `settings row` presses a row but does not scroll the page |
 | `settings [close\|<section>]` | show/hide the native settings page. With a word, scrolls to the first section whose title contains it (`settings Xbox`) — note that `present` hops to the main queue, so the scroll lands on the *second* call after the page first comes up |
 | `layout <edit\|done\|reset>` | the touch-layout editor (D-031). `edit` closes the settings page and makes every gameplay chip draggable; `drag X Y DX DY` then moves the chip under X,Y and leaves it **held for 1.5 s** so a screenshot taken straight after shows the drag rather than its result; `done` leaves; `reset` forgets every stored position. Every answer also reports `layout_entries=` and which labels are stored |
 | `audio` / `audio volume 0-100` / `audio mute on\|off` / `audio mode 0-4` | the Audio rows (D-033). `audio` alone reports every `audio_*` line. `volume` and `mute` move the shell's MASTER GAIN, which overlay 0023 multiplies into the frame's samples; `mode` is the five-mode Other App Audio policy (0 stop other, 1 play both, 2 lower other, 3 lower game, 4 mute game). The game's own Sound / Music / Sound Mode are NOT here - they are the eeprom's, edited in the game's own Audio Options page. Needed because injected events cannot move a `UISlider` and writing the preferences plist from outside is served from cfprefsd's cache |
@@ -105,6 +106,9 @@ entirely the wrong reason. If it truly cannot bind it says
 | `presented` | every window of every scene, the controllers presented in each and the orientations each supports |
 | `picker cancel` / `picker pick <path>` / `picker dismiss` | finish the REAL document picker (opened with `settings row …`) the way a finger does: it goes away, then its delegate hears cancelled or picked-with-that-file. `dismiss` closes whatever is on top (an alert, as if OK) |
 | `kbd` / `kbd type <text>` / `kbd back` / `kbd return` | the iOS software keyboard's own path (D-105). SDL raises the keyboard over a hidden UITextField when the game starts text input (the online pages' name, address, PIN, password and chat boxes); `type` inserts into that first responder one character at a time through UIKeyInput, which is what a key does, `back` is its delete key and `return` its Return. Bare `kbd` answers `kbd_up=0|1` (is a field first responder = is the keyboard up). `simctl` cannot type into a simulator app |
+| `alarm` | `alarm_active=0\|1`: `alarmIsActive()`, the stage's alarm (issue 5, D-117) |
+| `trace` | upstream's F3 state dump (`traceRequest()`), written at the next frame to `Documents/traces/pd-<stamp>.txt` with its screenshot: every chr's position, action, rooms and AI list, and the player's. Set `Mod.TraceReport=0` in pd.ini first, or the Report a Problem dialog opens over the game (D-117) |
+| `warp <refchr> <x> <y> <z> <yaw> <room>` | puts Bond at x,y,z in `room` facing `yaw` radians (pi/2 = +x; pi = -z) with `chrMoveToPos()`, and turns on the Invincible cheat - the oracle harness's warp (`artifacts/oracle/issue5/i5hack.py`). `refchr` is any live chr's number; CHR_BOND is looked up through it. Answers `warp ok=0\|1 …`. Take the room from a `trace`. Used by `artifacts/sim/issue5/sim-alarm.sh` (D-117) |
 | `quit` | `configSave()` then `exit(0)` — which is also the only way to end a scripted run with its settings written (`atexit(cleanup)`, `main.c:124`) |
 
 ### Why `tap` exists at all
@@ -158,6 +162,18 @@ player_aimmode=0|1                overlay 0021; the ENGINE's insightaimmode —
                                   from the last published frame, so poll it from
                                   a second connection during a `stream`
 touch_aimdrag=0|1                 the shell's half: an AIM press is live
+player_thirdperson=0|1|-1         overlay 0066 (D-116): the ENGINE's third-person request,
+                                  player->thirdperson, what the CK_1000 bind toggles; -1 no player
+player_thirdperson_effective=0|1  playerIsThirdPerson(): the camera is out this frame (aiming,
+                                  the GE watch, a long fall say no to a standing request)
+player_thirdperson_allowed=0|1    a change now is the player's own (not an online room without
+                                  Mod.NetThirdPerson, not the spectator)
+player_thirdperson_ready=0|1      a CK_1000 press now is the toggle and nothing else (normal
+                                  tick, no cutscene - any button skips one - alive, 30 frames in)
+thirdperson_switch=0|1            the shell's cached Settings switch (pd.camera.thirdPerson)
+thirdperson_presses / thirdperson_syncs   bind presses the switch made / in-play changes the
+                                  switch followed, since launch
+touch_view_hidden / touch_view_engaged    the VIEW chip (hidden by default; engaged = request on)
 pacing_mode=displaylink|bypass    docs/pacing.md
 pacing_links / pacing_presents / pacing_dropped / pacing_hz / pacing_target
 pacing_wait_mode=runloop|sem      how the game thread waits for the link (D-045)

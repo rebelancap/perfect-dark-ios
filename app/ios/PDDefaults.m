@@ -28,6 +28,7 @@ NSString *const PDDefButtonOpacity    = @"pd.touch.buttonOpacity";
 NSString *const PDDefHaptics          = @"pd.touch.haptics";
 NSString *const PDDefDoubleTapRoll    = @"pd.touch.doubleTapRoll";
 NSString *const PDDefFireDragLooks    = @"pd.touch.fireDragLooks";
+NSString *const PDDefThirdPerson      = @"pd.camera.thirdPerson";
 NSString *const PDDefControlStyle     = @"pd.control.style";
 NSString *const PDDefButtonLayout     = @"pd.touch.layout";
 
@@ -82,6 +83,8 @@ void PDDefaultsRegister(void)
 		PDDefHaptics: @YES,
 		PDDefDoubleTapRoll: @YES,
 		PDDefFireDragLooks: @YES,
+		// D-116: first person, as the game starts and as it always was here.
+		PDDefThirdPerson: @NO,
 		// D-022: dual analogue. It is not a new control style - it is the port's
 		// own default one (CONTROLMODE_PC, forced from Game.PlayerN.ExtendedControls
 		// on every gamefile load) with the touch stick finally on the axis that

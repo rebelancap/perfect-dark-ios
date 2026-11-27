@@ -1,0 +1,109 @@
+Subject: iOS: the player's third-person request, for the shell's switch and chip
+
+GitHub issue #6 (D-116). Upstream keeps no third-person key in pd.ini: the
+camera is player->thirdperson, a runtime request the CK_1000 bind toggles on
+its press edge (bondmove.c BUTTON_THIRDPERSON) and playermgr.c clears for every
+new player, so it is first person again at every stage start. The shell's
+Settings switch puts the remembered view back by pressing that same bind once
+the stage can take a press, and follows a pad's Back press by watching the
+request - which needs this read. Nothing here writes engine state.
+
+A new file rather than a fifth reader on player.c's tail, so it shares no
+context with other patches. Entirely inside PLATFORM_IOS; the GLOB in
+CMakeLists.txt picks it up at configure time.
+
+diff --git a/src/game/iosthirdperson.c b/src/game/iosthirdperson.c
+new file mode 100644
+index 0000000..3c08a82
+--- /dev/null
++++ b/src/game/iosthirdperson.c
+@@ -0,0 +1,89 @@
++/**
++ * Third person, read for the iOS shell (D-116, GitHub issue #6).
++ *
++ * Upstream holds no third-person key in pd.ini: the camera is the player's
++ * runtime request, player->thirdperson, which the CK_1000 bind toggles on its
++ * press edge (bondmove.c, BUTTON_THIRDPERSON) and playermgr.c clears for every
++ * new player, i.e. at every stage start. The shell's Settings switch and its
++ * on-screen VIEW chip both drive that request through the bind, never by
++ * writing it; this is how the shell sees what the bind did, so the switch can
++ * follow a pad's Back press and put the view back at the next stage start.
++ *
++ * Read-only, called from the shell's frame hook like the 0021/0052 readers.
++ * Its own file so it never has to share player.c's tail with other patches.
++ */
++#include <ultra64.h>
++#include "constants.h"
++#include "game/player.h"
++#include "game/modoptions.h"
++#include "game/modspectate.h"
++#include "net/net.h"
++#include "bss.h"
++#include "lib/vars.h"
++#include "data.h"
++#include "types.h"
++
++// platform.h (through ultra64.h) is what defines PLATFORM_IOS, so the guard
++// comes after the includes.
++#ifdef PLATFORM_IOS
++
++// This machine's player: the 0059 rule (online, a client is g_NetLocalSlot).
++static s32 iosTpLocalNum(void)
++{
++	if (g_NetMode != NETMODE_NONE && g_NetLocalSlot >= 0 && g_NetLocalSlot < MAX_PLAYERS
++			&& g_Vars.players[g_NetLocalSlot]) {
++		return g_NetLocalSlot;
++	}
++
++	return g_Vars.currentplayernum;
++}
++
++/**
++ * Returns the request (player->thirdperson: 0 or 1), or -1 with no player.
++ *
++ * *effective: playerIsThirdPerson() - whether the camera is out this frame
++ *     (aiming, the GE watch, a long fall and a missing body all say no to a
++ *     standing request).
++ * *allowed: a change of the request now is the player's own choice: third
++ *     person is allowed here (modIsThirdPersonAllowed, online the room's
++ *     Mod.NetThirdPerson rule) and the spectator, which forces it on and gives
++ *     it back on the way out, is not running.
++ * *ready: a CK_1000 press now is read as the toggle and as nothing else:
++ *     a normal tick (ANY button skips a cutscene, player.c playerTickCutscene),
++ *     alive, and past the first 30 frames of the stage.
++ * *lvframe: g_Vars.lvframenum, which restarts with every stage instance - the
++ *     shell's "the request was just reset by a new stage" signal, with *stage.
++ */
++s32 playerIosThirdPerson(s32 *effective, s32 *allowed, s32 *ready, s32 *stage, s32 *lvframe)
++{
++	const s32 pn = iosTpLocalNum();
++	struct player *p = (pn >= 0 && pn < MAX_PLAYERS) ? g_Vars.players[pn] : NULL;
++
++	if (effective) *effective = 0;
++	if (allowed) *allowed = 0;
++	if (ready) *ready = 0;
++	if (stage) *stage = g_Vars.stagenum;
++	if (lvframe) *lvframe = g_Vars.lvframenum;
++
++	if (!p || !p->prop) {
++		return -1;
++	}
++
++	if (effective) {
++		*effective = playerIsThirdPerson(p) ? 1 : 0;
++	}
++
++	if (allowed) {
++		*allowed = modIsThirdPersonAllowed() && !modSpectateIsOnForPlayer(pn);
++	}
++
++	if (ready) {
++		*ready = g_Vars.tickmode == TICKMODE_NORMAL
++			&& !g_Vars.in_cutscene
++			&& !p->isdead
++			&& g_Vars.lvframenum >= 30;
++	}
++
++	return p->thirdperson ? 1 : 0;
++}
++#endif

@@ -84,6 +84,15 @@ int playerIosGunHasSecondary(void);
 int playerIosGunState(int *function);
 int playerIosActiveMenu(int *slot);
 
+// overlay 0066 — third person (D-116). Returns the player's REQUEST
+// (player->thirdperson, what the CK_1000 bind toggles; -1 with no player);
+// effective = the camera is out this frame; allowed = a change now is the
+// player's own (third person allowed here, no spectator); ready = a CK_1000
+// press now is the toggle and nothing else (normal tick, no cutscene - any
+// button skips one - alive, 30 frames into the stage); stage + lvframe tell a
+// new stage instance (the request is reset there).
+int playerIosThirdPerson(int *effective, int *allowed, int *ready, int *stage, int *lvframe);
+
 // src/game/options.c — CONTROLMODE_11 = 0 (N64 1.1), CONTROLMODE_PC = 8.
 int optionsGetControlMode(int mpchrnum);
 void optionsSetControlMode(int mpchrnum, int mode);

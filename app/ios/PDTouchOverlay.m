@@ -200,6 +200,10 @@ typedef struct {
 #define PD_CK_Y_NEXTWEAP 0x00000080u  // CK_Y  — "Next Weapon"
 #define PD_CK_ROLL       0x08000000u  // CK_0800 — Dab's "Combat Roll"
 #define PD_CK_CROUCH     0x80000000u  // CK_8000 — "Cycle Crouch"
+// D-116 (GitHub issue #6): Dab's third-person toggle, "Third Person [+]"
+// (optionsmenu.c menuBinds), BUTTON_THIRDPERSON = CONT_1000, read on its press
+// EDGE by bondmove.c. A pad's Back is bound to it (input.c inputMigrateRollBind).
+#define PD_CK_THIRDPERSON 0x10000000u // CK_1000 — "Third Person"
 // D-085 (GitHub issue #1): the Xbox 360 pad's RB and LB. The port binds RB to
 // CK_LTRIG, "Fire Mode [LT]" = BUTTON_ALTMODE, the gun-function toggle
 // (bondmove.c bgunProcessInputAltButton), and LB to CK_DPAD_D, "Radial Menu
@@ -242,6 +246,13 @@ static const PDButtonSpec kButtons[] = {
 	// START and clear of the radar and WHEEL. A phone has no T key and a pad
 	// has no chat at all, so without it a touch player could not talk in a match.
 	{ "CHAT",   0,                "bubble.left.fill",            0.9400, 0.2400, 20 },
+	// VIEW (D-116, GitHub issue #6; the user's queued spec 2026-10-12): the
+	// third-person toggle, through the same CK_1000 bind a pad's Back presses.
+	// HIDDEN BY DEFAULT (pdLabelHiddenByDefault): the default layout is the one
+	// he tuned, and a player shows it from Customize Touch Layout's eye badge.
+	// Left of WHEEL on its row, one chip gap clear of WHEEL and RELOAD. Engaged
+	// (the brighter ring) while third person is the request.
+	{ "VIEW",   PD_CK_THIRDPERSON, "camera.rotate",              0.8000, 0.3720, 28 },
 };
 #define PD_NUM_BUTTONS ((int)(sizeof(kButtons) / sizeof(kButtons[0])))
 
@@ -525,6 +536,22 @@ static const PDButtonSpec kMenuButtons[] = {
 	CGFloat _cLookDegX, _cLookDegY, _cLookInvert;
 	BOOL _cDoubleTapRoll;
 	BOOL _cFireDragLooks;      // D-113: FIRE / FIRE_L hold-and-drag turn the view like AIM
+	BOOL _cThirdPerson;        // D-116: the view the player last chose (PDDefThirdPerson)
+
+	// D-116: third person. The engine's request as last seen (-1 no player),
+	// the stage instance it was seen in, and the Settings switch's bind press:
+	// frames left to hold CK_1000, frames before another may be tried, and how
+	// many this stage instance has tried (a press the game never takes must
+	// not become a button held down for ever).
+	PDTouchButtonView *_viewChip;
+	int _tpLast;
+	int _tpStage;
+	int _tpLvframe;
+	int _tpPressFrames;
+	int _tpCooldown;
+	int _tpAttempts;
+	unsigned _tpSyncs;         // times the request changed in play and the switch followed
+	unsigned _tpPresses;       // times the switch pressed the bind
 	NSInteger _cControlStyle;
 	uint32_t _publishes;
 
@@ -842,19 +869,43 @@ static BOOL pdLabelHideable(NSString *label)
 	return label.length && ![label isEqualToString:@"START"];
 }
 
+/**
+ * D-116: chips that are hidden until the player shows them - VIEW, so the
+ * default layout stays the one the user tuned. For these the STORED flag is
+ * `hidden = NO` once shown (absence means hidden), so a layout Reset, which
+ * forgets every entry, hides them again.
+ */
+static BOOL pdLabelHiddenByDefault(NSString *label)
+{
+	return [label isEqualToString:@"VIEW"];
+}
+
 /** The hidden flags, read from the same store as the positions. */
 static NSMutableSet<NSString *> *pdHiddenLabels(void)
 {
 	NSMutableSet<NSString *> *out = [NSMutableSet set];
 	NSDictionary *all = [NSUserDefaults.standardUserDefaults dictionaryForKey:PDDefButtonLayout];
+	// Hidden-by-default chips start in the set and leave it only on an
+	// explicit `hidden = NO` (D-116).
+	for (int i = 0; i < PD_NUM_BUTTONS; i++) {
+		NSString *label = @(kButtons[i].label);
+		if (pdLabelHiddenByDefault(label)) {
+			[out addObject:label];
+		}
+	}
 	for (NSString *label in all) {
 		id entry = all[label];
 		if (![label isKindOfClass:NSString.class] || ![entry isKindOfClass:NSDictionary.class]) {
 			continue;
 		}
 		id h = ((NSDictionary *)entry)[@"hidden"];
-		if ([h respondsToSelector:@selector(boolValue)] && [h boolValue] && pdLabelHideable(label)) {
+		if (![h respondsToSelector:@selector(boolValue)] || !pdLabelHideable(label)) {
+			continue;
+		}
+		if ([h boolValue]) {
 			[out addObject:label];
+		} else {
+			[out removeObject:label];
 		}
 	}
 	return out;
@@ -870,7 +921,14 @@ static NSMutableSet<NSString *> *pdHiddenLabels(void)
 	if ([all[label] isKindOfClass:NSDictionary.class]) {
 		[entry addEntriesFromDictionary:all[label]];
 	}
-	if (hidden) {
+	if (pdLabelHiddenByDefault(label)) {
+		// D-116: absence is hidden, so SHOWN is the flag that has to be kept.
+		if (hidden) {
+			[entry removeObjectForKey:@"hidden"];
+		} else {
+			entry[@"hidden"] = @NO;
+		}
+	} else if (hidden) {
 		entry[@"hidden"] = @YES;
 	} else {
 		[entry removeObjectForKey:@"hidden"];
@@ -1556,6 +1614,11 @@ static const CGFloat kWheelRadius = 32.0;
 	_cLookInvert = PDDefBool(PDDefInvertY) ? -1.0 : 1.0;
 	_cDoubleTapRoll = PDDefBool(PDDefDoubleTapRoll);
 	_cFireDragLooks = PDDefBool(PDDefFireDragLooks);
+	const BOOL tp = PDDefBool(PDDefThirdPerson);
+	if (tp != _cThirdPerson) {
+		_tpAttempts = 0;   // a new ask from the Settings page gets its own tries
+	}
+	_cThirdPerson = tp;
 	_cControlStyle = PDDefInt(PDDefControlStyle);
 	_userHidden = pdHiddenLabels();
 }
@@ -1591,6 +1654,7 @@ static const CGFloat kWheelRadius = 32.0;
 		if ([b.label isEqualToString:@"ALT"]) { _altChip = b; }
 		if ([b.label isEqualToString:@"WHEEL"]) { _wheelChip = b; }
 		if ([b.label isEqualToString:@"CHAT"]) { _chatChip = b; b.hidden = YES; }
+		if ([b.label isEqualToString:@"VIEW"]) { _viewChip = b; }
 	}
 	// Fainter: placeable and pressable, but temporary (bean).
 	_leftFire = [[PDTouchButtonView alloc] initWithSpec:&kLeftFire
@@ -2735,7 +2799,100 @@ static CGVector pdStickCurve(CGVector raw)
 		_pointerScrolled = NO;
 	}
 	[self applyChipRules];
+	[self thirdPersonTick];
 	[self updateGearVisibility];
+}
+
+/**
+ * D-116 (GitHub issue #6): keep the Settings switch and the game's third-person
+ * request in step. Once a frame, on the game thread, whatever else is going on.
+ *
+ * The request is runtime-only upstream (player->thirdperson; no pd.ini key)
+ * and a new stage starts it at first person, so:
+ *   - a change of the request DURING a stage instance, where the game allows
+ *     the player the choice, is the player's (a pad's Back, the VIEW chip, a
+ *     keyboard's V) and the switch follows it - it is never left lying;
+ *   - the reset a new stage does is not a choice and is not followed;
+ *   - when the request differs from the switch and the stage can take a press
+ *     (no cutscene: any button skips one; no menu, no pause, alive), the bind
+ *     is pressed once - the same CK_1000 path as the chip and the pad.
+ * Where the game says no (online rooms without Mod.NetThirdPerson, the
+ * spectator) nothing is followed and nothing is pressed.
+ */
+- (void)thirdPersonTick
+{
+	if (_tpCooldown > 0) {
+		_tpCooldown--;
+	}
+	int effective = 0, allowed = 0, ready = 0, stage = 0, lvframe = 0;
+	const int req = playerIosThirdPerson(&effective, &allowed, &ready, &stage, &lvframe);
+	const BOOL newStage = stage != _tpStage || lvframe < _tpLvframe;
+	_tpStage = stage;
+	_tpLvframe = lvframe;
+	if (newStage) {
+		_tpAttempts = 0;
+	}
+
+	if (_viewChip && !_editing) {
+		_viewChip.engaged = req == 1;
+	}
+
+	if (req < 0) {
+		_tpLast = -1;
+		return;
+	}
+	if (newStage || _tpLast < 0) {
+		_tpLast = req;   // the baseline, not a choice
+	} else if (req != _tpLast) {
+		_tpLast = req;
+		if (allowed && (BOOL)req != _cThirdPerson) {
+			_cThirdPerson = req ? YES : NO;
+			[NSUserDefaults.standardUserDefaults setBool:_cThirdPerson forKey:PDDefThirdPerson];
+			_tpSyncs++;
+			NSLog(@"perfectdark: [touch] third person %@ in play - the switch follows (D-116)",
+				req ? @"on" : @"off");
+		}
+	}
+
+	// A press still in flight when a menu, the pause or this page comes up is
+	// dropped rather than delivered after it closes, when it may no longer be
+	// wanted; the cooldown makes the next decision read a settled request.
+	if (_tpPressFrames > 0 && (_menuOpen || _editing || PDSettingsViewController.isPresented)) {
+		_tpPressFrames = 0;
+	}
+	if (_tpPressFrames > 0 || _tpCooldown > 0 || _tpAttempts >= 5) {
+		return;
+	}
+	if ((BOOL)req == _cThirdPerson || !allowed || !ready || _editing || _menuOpen
+	    || PDSettingsViewController.isPresented || playerIosIsPaused()) {
+		return;
+	}
+	_tpPressFrames = 3;   // held over a few frames, as the roll's press is
+	_tpCooldown = 45;     // and the answer read well after it
+	_tpAttempts++;
+	_tpPresses++;
+	NSLog(@"perfectdark: [touch] third person: the switch says %@, the game %@ - pressing the bind (D-116, try %d)",
+		_cThirdPerson ? @"on" : @"off", req ? @"on" : @"off", _tpAttempts);
+}
+
+/** The switch's CK_1000 press, if one is in flight, for this frame's mask. */
+- (unsigned)thirdPersonPressMask
+{
+	if (_tpPressFrames <= 0) {
+		return 0;
+	}
+	_tpPressFrames--;
+	return PD_CK_THIRDPERSON;
+}
+
+/** `state` lines (D-116): the switch, the shell's press, the chip. */
+- (NSString *)thirdPersonReport
+{
+	return [NSString stringWithFormat:
+		@"thirdperson_switch=%d\nthirdperson_presses=%u\nthirdperson_syncs=%u\n"
+		 "touch_view_hidden=%d\ntouch_view_engaged=%d\n",
+		(int)_cThirdPerson, _tpPresses, _tpSyncs,
+		_viewChip ? (int)_viewChip.hidden : -1, _viewChip ? (int)_viewChip.engaged : -1];
 }
 
 /**
@@ -2746,6 +2903,14 @@ static CGVector pdStickCurve(CGVector raw)
 - (void)publishRoll
 {
 	if (_rollFrames <= 0) {
+		// D-116: the Settings switch's bind press, with a pad connected (the
+		// layer is hidden then, and this is all that publishes).
+		const unsigned tp = [self thirdPersonPressMask];
+		if (tp) {
+			inputIosPadSet(tp, 0, 0);
+			_sentMask = tp;
+			return;
+		}
 		// One trailing frame of zeroes, so the strafe ends where the script says
 		// it ends rather than staying latched in the injected pad.
 		if (_sentMask || _sentStick.dx != 0.0 || _sentStick.dy != 0.0) {
@@ -2923,7 +3088,8 @@ static CGVector pdStickCurve(CGVector raw)
  */
 - (NSString *)heldReport
 {
-	return [[self heldLines] stringByAppendingString:[self cornerGeometryReport]];
+	return [[[self heldLines] stringByAppendingString:[self thirdPersonReport]]
+		stringByAppendingString:[self cornerGeometryReport]];
 }
 
 - (NSString *)heldLines
@@ -3093,6 +3259,7 @@ static CGVector pdStickCurve(CGVector raw)
 		_tapConfirmFrames--;
 		mask |= PDPadA;   // "Use / Accept"
 	}
+	mask |= [self thirdPersonPressMask];   // D-116: the Settings switch's press
 
 	// The weapon wheel's drag is the LEFT stick, which is what the active menu
 	// reads (activemenutick.c) and, under CONTROLMODE_PC, nothing else the shell

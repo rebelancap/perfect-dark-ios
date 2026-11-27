@@ -67,6 +67,14 @@ extern int bgunGetAmmoQtyForWeapon(unsigned weaponnum, unsigned func);
 extern int g_GexPlusNoticeDrawn;
 extern int g_GexPlusNoticeHeld;
 extern unsigned long long pdAngleSwapCount(void);
+// Issue 5 (D-117): `alarm`, `trace` and `warp`. Plain engine calls; a chr is
+// an opaque pointer here (the game's bool is an s32, its RoomNum an s16).
+extern int alarmIsActive(void);
+extern void traceRequest(void);
+extern void *chrFindByLiteralId(int chrnum);
+extern void *chrFindById(void *basechr, int chrnum);
+extern int chrMoveToPos(void *chr, float *pos, short *rooms, float angle, int force);
+extern void cheatActivate(int cheat_id);
 
 static const int kDefaultPort = 8775;
 static const NSTimeInterval kEngineTimeout = 5.0;
@@ -247,7 +255,7 @@ static NSString *pdErr(NSString *fmt, ...)
 		        " heartbeat | hang <ms> | dump | graft <on|off> | hide60 <on|off> | thermal-sim <0-3|off|panel HZ|off> | governor [on|off] |"
 		        " stall <ms>|every <s> <ms>|off | geo [repair on|off|now] | presented | picker cancel|dismiss|pick <path> |"
 		        " audio trace on|off|dump [name] | audio interrupt begin|end |"
-		        " give <weaponnum> [noammo] | ammo <weaponnum> | pacing engine <hz|auto> | kbd [type <text>|back|return]"
+		        " give <weaponnum> [noammo] | ammo <weaponnum> | alarm | trace | warp <refchr> <x> <y> <z> <yaw> <room> | pacing engine <hz|auto> | kbd [type <text>|back|return]"
 #if TARGET_OS_VISION
 	        " | 3d <on|off|park|unpark|crown|showeye|state|recenter|depth <pct>|gunconv <units>"
 	        "|settings <open|close|get|set <row> <value>|press <row>|reset>>"
@@ -593,6 +601,52 @@ static NSString *pdErr(NSString *fmt, ...)
 	// simulator at all. The user found it in the headset instead.
 	//
 	// WEAPON_FALCON2 is 2 (constants.h:4653); anything the enum knows works.
+	// Issue 5 (D-117): the alarm's state, upstream's F3 state dump (every chr's
+	// position, action, rooms and AI list, in Documents/traces/), and Bond put
+	// at a position of the script's choosing - invincible, as the oracle
+	// harness's warp (artifacts/oracle/issue5/i5hack.py) puts him.
+	if ([cmd isEqualToString:@"alarm"]) {
+		__block int on = 0;
+		if (![shell enqueueAndWait:^{ on = alarmIsActive() ? 1 : 0; } timeout:kEngineTimeout]) {
+			return pdErr(@"engine did not reach a frame boundary");
+		}
+		return [NSString stringWithFormat:@"alarm_active=%d", on];
+	}
+
+	if ([cmd isEqualToString:@"trace"]) {
+		if (![shell enqueueAndWait:^{ traceRequest(); } timeout:kEngineTimeout]) {
+			return pdErr(@"engine did not reach a frame boundary");
+		}
+		return @"trace requested (Documents/traces/, written at the next frame; Mod.TraceReport 0 keeps the report dialog away)";
+	}
+
+	if ([cmd isEqualToString:@"warp"]) {
+		if (argv.count < 7) {
+			return pdErr(@"usage: warp <refchr> <x> <y> <z> <yaw radians> <room>   (refchr: any live chr, for CHR_BOND's lookup)");
+		}
+		const int ref = (int)argv[1].integerValue;
+		const float x = argv[2].floatValue, y = argv[3].floatValue, z = argv[4].floatValue;
+		const float yaw = argv[5].floatValue;
+		const short room = (short)argv[6].integerValue;
+		__block int ok = -1;
+		if (![shell enqueueAndWait:^{
+				float pos[3] = { x, y, z };
+				short rooms[2] = { room, -1 };
+				void *refchr = chrFindByLiteralId(ref);
+				void *bond = refchr ? chrFindById(refchr, 0xf8) : NULL; // CHR_BOND
+				if (bond) {
+					ok = chrMoveToPos(bond, pos, rooms, yaw, 1) ? 1 : 0;
+					cheatActivate(2); // CHEAT_INVINCIBLE
+				}
+			} timeout:kEngineTimeout]) {
+			return pdErr(@"engine did not reach a frame boundary");
+		}
+		if (ok < 0) {
+			return pdErr(@"no chr %d (or no Bond) to warp by", ref);
+		}
+		return [NSString stringWithFormat:@"warp ok=%d to=%.1f,%.1f,%.1f yaw=%.3f room=%d invincible=1", ok, x, y, z, yaw, room];
+	}
+
 	if ([cmd isEqualToString:@"give"]) {
 		if (argv.count < 2) {
 			return pdErr(@"usage: give <weaponnum>   (2 = Falcon 2)");
@@ -1625,6 +1679,12 @@ static NSString *pdErr(NSString *fmt, ...)
 		if (argv.count > 1) {
 			// `settings xbla` scrolls to the Xbox 360 section, so a screenshot
 			// of the rows under test is one command rather than a finger.
+			// `settings controls 6`: that row of the section at the top, so a
+			// row below the fold can be screenshotted (D-116).
+			if (argv.count > 2 && argv[2].integerValue > 0) {
+				[PDSettingsViewController scrollToSectionContaining:argv[1] row:argv[2].integerValue];
+				return [NSString stringWithFormat:@"settings open at %@ row %ld", argv[1], (long)argv[2].integerValue];
+			}
 			[PDSettingsViewController scrollToSectionContaining:argv[1]];
 			return [NSString stringWithFormat:@"settings open at %@", argv[1]];
 		}

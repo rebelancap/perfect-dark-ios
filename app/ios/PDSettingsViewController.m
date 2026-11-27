@@ -639,6 +639,15 @@ static CFTimeInterval sPresentStarted;
 	[vc scrollTo:needle];
 }
 
++ (void)scrollToSectionContaining:(NSString *)needle row:(NSInteger)row
+{
+	if (!NSThread.isMainThread) {
+		dispatch_async(dispatch_get_main_queue(), ^{ [self scrollToSectionContaining:needle row:row]; });
+		return;
+	}
+	[[self presentedController] scrollToSection:needle row:row];
+}
+
 - (void)scrollTo:(NSString *)needle
 {
 	[self scrollToSection:needle row:0];
@@ -733,6 +742,11 @@ static CFTimeInterval sPresentStarted;
 			// D-113 (GitHub issue #4, as Project Midas has it): hold FIRE and the
 			// same finger's drag turns the view, the way AIM's already does.
 			pdSwitchRow(@"Drag Fire to look", PDDefFireDragLooks),
+			// D-116 (GitHub issue #6): Dab's third-person camera. Not a pd.ini
+			// key upstream - the touch layer presses the game's own bind at
+			// each stage start and follows a pad's Back (PDTouchOverlay
+			// -thirdPersonTick), so this switch is the view last chosen.
+			pdSwitchRow(@"Third person", PDDefThirdPerson),
 			// The layout editor - which now owns the size as well, so there is
 			// no "Button size" row here. Closing this page first is not
 			// tidiness: the settings window sits at UIWindowLevelAlert over the
@@ -1150,7 +1164,10 @@ static CFTimeInterval sPresentStarted;
 		        "In a menu, tap an item to choose it, drag up or down to scroll (a drag never "
 		        "chooses), and tap left or right of the menu to go to the previous or next one. "
 		        "Double-tap the left of the screen to roll that way, the middle of it to roll "
-		        "the other.";
+		        "the other. "
+		        "Third person puts the camera behind you in missions and the Combat Simulator; "
+		        "it follows a gamepad's Back button and the camera button (show it from Customize "
+		        "Touch Layout), and aiming still looks down the sights. Online, the room decides.";
 	}
 	if ([_sections[(NSUInteger)s] isEqualToString:@"Display"]) {
 		return @""

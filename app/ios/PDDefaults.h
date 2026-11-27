@@ -49,6 +49,18 @@ extern NSString *const PDDefHaptics;           // bool
 extern NSString *const PDDefDoubleTapRoll;     // bool
 extern NSString *const PDDefFireDragLooks;     // bool — hold FIRE and drag that finger to look (D-113)
 
+/**
+ * Third person (D-116, GitHub issue #6). Upstream keeps no pd.ini key for it:
+ * the camera is the player's runtime request (player->thirdperson), toggled by
+ * the CK_1000 bind - a pad's Back, the VIEW chip - and cleared at every stage
+ * start. So this is the view the player last CHOSE: the touch layer presses
+ * the bind once a new stage can take it when this is on, and writes it back
+ * whenever the request changes in play (a pad's Back, the VIEW chip), so the
+ * switch never disagrees with the game. Never forced where the game says no
+ * (online rooms without Mod.NetThirdPerson, cutscenes, the spectator).
+ */
+extern NSString *const PDDefThirdPerson;       // bool, default NO
+
 // Control style (Q-003 / D-022). 0 = dual analogue: the touch stick is
 // analogue MOVEMENT on the right stick and the drag is look, which is what
 // CONTROLMODE_PC means. 1 = the N64 styles, where the stick sends the four C

@@ -72,6 +72,8 @@ NS_ASSUME_NONNULL_BEGIN
 
 /** Scroll the page to the section whose title contains `needle`. */
 + (void)scrollToSectionContaining:(NSString *)needle;
+/** ...with row `row` of it at the top (the bridge's `settings <section> <row>`, D-116). */
++ (void)scrollToSectionContaining:(NSString *)needle row:(NSInteger)row;
 
 /**
  * The GoldenEye rows' picker completion, driven from the bridge with a file the
